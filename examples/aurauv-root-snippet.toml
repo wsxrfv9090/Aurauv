@@ -1,0 +1,48 @@
+# -----------------------------------------------------------------------------
+# Aurauv: machine route and workspace environment ownership
+# -----------------------------------------------------------------------------
+[tool.aurauv]
+schema-version = 1
+project = "Workspace Example"
+minimum-uv = "0.10.0"
+python-request = "3.13"
+python-install-policy = "ask"
+uv-update-policy = "ask"
+state-directory = ".aurauv"
+
+[tool.aurauv.verify]
+imports = ["model_core"]
+
+[tool.aurauv.routes.accelerator]
+default = "auto"
+detector = "pytorch"
+providers = ["pytorch"]
+fallbacks = { cuda = "cpu", mps = "cpu" }
+
+[tool.aurauv.routes.accelerator.options.cpu]
+extras = ["cpu"]
+description = "Official CPU wheel; valid even on an NVIDIA machine"
+
+[tool.aurauv.routes.accelerator.options.mps]
+extras = ["mps"]
+description = "Apple Silicon MPS runtime; wheel source remains the CPU index"
+
+[tool.aurauv.routes.accelerator.options.cuda]
+extras = ["cuda"]
+description = "NVIDIA runtime; backend is derived from the provider project's CUDA index URL"
+
+[tool.aurauv.members.model_core]
+path = "modules/model-core"
+distribution = "model-core"
+standalone-lock = "metadata"
+metadata-files = ["pyproject.toml", "uv.lock", "README.md"]
+
+[tool.aurauv.providers.pytorch]
+type = "pytorch"
+project = "modules/model-core"
+route = "accelerator"
+packages = ["torch", "torchvision"]
+extras = { cpu = "cpu", mps = "mps", cuda = "cuda" }
+indexes = { cpu = "pytorch-cpu", mps = "pytorch-cpu", cuda = "pytorch-cuda" }
+imports = { torch = "torch", torchvision = "torchvision" }
+mps-requires-available = true

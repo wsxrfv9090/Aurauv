@@ -1,0 +1,39 @@
+# This makes the member usable when cloned alone.  When it is inside an outer
+# Aurauv workspace, the outer environment owner configuration takes precedence.
+
+[tool.aurauv]
+schema-version = 1
+project = "My independently cloneable member"
+minimum-uv = "0.10.0"
+python-request = "3.13"
+python-install-policy = "ask"
+uv-update-policy = "ask"
+state-directory = ".aurauv"
+allow-unmanaged-submodule = false
+
+[tool.aurauv.verify]
+imports = ["member_package"]
+
+[tool.aurauv.routes.accelerator]
+default = "auto"
+detector = "pytorch"
+providers = ["pytorch"]
+fallbacks = { cuda = "cpu", mps = "cpu" }
+
+[tool.aurauv.routes.accelerator.options.cpu]
+extras = ["cpu"]
+
+[tool.aurauv.routes.accelerator.options.mps]
+extras = ["mps"]
+
+[tool.aurauv.routes.accelerator.options.cuda]
+extras = ["cuda"]
+
+[tool.aurauv.providers.pytorch]
+type = "pytorch"
+project = "."
+route = "accelerator"
+packages = ["torch", "torchvision"]
+extras = { cpu = "cpu", mps = "mps", cuda = "cuda" }
+indexes = { cpu = "pytorch-cpu", mps = "pytorch-cpu", cuda = "pytorch-cuda" }
+mps-requires-available = true

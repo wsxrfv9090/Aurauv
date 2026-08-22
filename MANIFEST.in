@@ -1,0 +1,10 @@
+include LICENSE README.md CHANGELOG.md
+recursive-include docs *.md
+recursive-include examples *.toml *.md
+recursive-include bootstrap *.py *.pyz *.sh *.bat
+recursive-include scripts *.py
+recursive-include templates *.md *.toml *.py *.pyz *.sh *.bat
+recursive-include tests *.py *.toml
+recursive-include tools *.py
+prune **/__pycache__
+global-exclude *.py[cod]

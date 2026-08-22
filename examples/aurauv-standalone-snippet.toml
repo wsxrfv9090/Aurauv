@@ -1,0 +1,40 @@
+# -----------------------------------------------------------------------------
+# Aurauv standalone contract. When this project is a managed workspace member,
+# the outer workspace root [tool.aurauv] remains the environment owner.
+# -----------------------------------------------------------------------------
+[tool.aurauv]
+schema-version = 1
+project = "Standalone Example"
+minimum-uv = "0.10.0"
+python-request = "3.13"
+python-install-policy = "ask"
+uv-update-policy = "ask"
+state-directory = ".aurauv"
+
+[tool.aurauv.verify]
+imports = ["sample_app"]
+
+[tool.aurauv.routes.accelerator]
+default = "auto"
+detector = "pytorch"
+providers = ["pytorch"]
+fallbacks = { cuda = "cpu", mps = "cpu" }
+
+[tool.aurauv.routes.accelerator.options.cpu]
+extras = ["cpu"]
+
+[tool.aurauv.routes.accelerator.options.mps]
+extras = ["mps"]
+
+[tool.aurauv.routes.accelerator.options.cuda]
+extras = ["cuda"]
+
+[tool.aurauv.providers.pytorch]
+type = "pytorch"
+project = "."
+route = "accelerator"
+packages = ["torch", "torchvision"]
+extras = { cpu = "cpu", mps = "mps", cuda = "cuda" }
+indexes = { cpu = "pytorch-cpu", mps = "pytorch-cpu", cuda = "pytorch-cuda" }
+imports = { torch = "torch", torchvision = "torchvision" }
+mps-requires-available = true

@@ -1,0 +1,42 @@
+# Append after defining cpu/mps/cuda extras, tool.uv.conflicts,
+# tool.uv.sources, and official PyTorch indexes in this same project.
+
+[tool.aurauv]
+schema-version = 1
+project = "My standalone ML project"
+minimum-uv = "0.10.0"
+python-request = "3.13"
+python-install-policy = "ask"
+uv-update-policy = "ask"
+state-directory = ".aurauv"
+allow-unmanaged-submodule = false
+
+[tool.aurauv.verify]
+imports = ["my_package"]
+
+[tool.aurauv.routes.accelerator]
+default = "auto"
+detector = "pytorch"
+providers = ["pytorch"]
+fallbacks = { cuda = "cpu", mps = "cpu" }
+
+[tool.aurauv.routes.accelerator.options.cpu]
+extras = ["cpu"]
+description = "Official PyTorch CPU wheels"
+
+[tool.aurauv.routes.accelerator.options.mps]
+extras = ["mps"]
+description = "Apple MPS runtime using official CPU-index wheels"
+
+[tool.aurauv.routes.accelerator.options.cuda]
+extras = ["cuda"]
+description = "NVIDIA CUDA wheels selected by the configured index URL"
+
+[tool.aurauv.providers.pytorch]
+type = "pytorch"
+project = "."
+route = "accelerator"
+packages = ["torch", "torchvision"]
+extras = { cpu = "cpu", mps = "mps", cuda = "cuda" }
+indexes = { cpu = "pytorch-cpu", mps = "pytorch-cpu", cuda = "pytorch-cuda" }
+mps-requires-available = true
