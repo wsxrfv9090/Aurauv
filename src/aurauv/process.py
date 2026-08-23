@@ -8,7 +8,7 @@ import subprocess
 from typing import Mapping, Sequence
 
 from .errors import CommandError
-from .utils import command_text, info
+from .utils import command_text, info, redact_command, redact_diagnostic
 
 
 class CommandRunner:
@@ -24,8 +24,9 @@ class CommandRunner:
         announce: bool = True,
     ) -> subprocess.CompletedProcess[str]:
         normalized = tuple(str(part) for part in command)
+        display_command = redact_command(normalized)
         if announce:
-            info(f"Command: {command_text(normalized)}")
+            info(f"Command: {command_text(display_command)}")
         completed = subprocess.run(
             normalized,
             cwd=cwd,
@@ -37,9 +38,9 @@ class CommandRunner:
         )
         if completed.returncode not in set(allowed_exit_codes):
             raise CommandError(
-                command=normalized,
+                command=display_command,
                 returncode=completed.returncode,
-                stdout=completed.stdout or "",
-                stderr=completed.stderr or "",
+                stdout=redact_diagnostic(completed.stdout or "", normalized),
+                stderr=redact_diagnostic(completed.stderr or "", normalized),
             )
         return completed

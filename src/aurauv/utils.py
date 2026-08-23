@@ -14,6 +14,7 @@ import sys
 import tempfile
 import tomllib
 from typing import Any, Iterable, Sequence
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from .errors import AurauvError
 
@@ -22,6 +23,32 @@ _VERSION = re.compile(r"\d+")
 _REQUIREMENT_HEAD = re.compile(
     r"^\s*(?P<name>[A-Za-z0-9_.-]+)\s*(?:\[(?P<extras>[^]]+)\])?"
 )
+_URL = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://[^\s]+")
+_SENSITIVE_OPTIONS = {
+    "--api-key",
+    "--client-secret",
+    "--credential",
+    "--credentials",
+    "--password",
+    "--secret",
+    "--token",
+}
+_SENSITIVE_QUERY_PARTS = {
+    "api-key",
+    "apikey",
+    "auth",
+    "authorization",
+    "credential",
+    "credentials",
+    "key",
+    "password",
+    "passwd",
+    "secret",
+    "sig",
+    "signature",
+    "token",
+}
+_REDACTED = "<redacted>"
 
 
 def info(message: str) -> None:
@@ -40,6 +67,89 @@ def command_text(command: Sequence[str]) -> str:
     if os.name == "nt":
         return subprocess.list2cmdline(list(command))
     return shlex.join(command)
+
+
+def _sensitive_query_key(value: str) -> bool:
+    normalized = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
+    parts = set(normalized.split("-"))
+    return normalized in _SENSITIVE_QUERY_PARTS or bool(parts & _SENSITIVE_QUERY_PARTS)
+
+
+def _redact_url(value: str) -> str:
+    try:
+        parsed = urlsplit(value)
+    except ValueError:
+        return value
+    netloc = parsed.netloc
+    if "@" in netloc:
+        netloc = f"{_REDACTED}@{netloc.rsplit('@', 1)[1]}"
+    query = parsed.query
+    if query:
+        pairs = parse_qsl(query, keep_blank_values=True)
+        if pairs:
+            redacted_pairs = [
+                (key, _REDACTED if _sensitive_query_key(key) else item)
+                for key, item in pairs
+            ]
+            query = urlencode(redacted_pairs).replace("%3Credacted%3E", _REDACTED)
+        elif _sensitive_query_key(query.partition("=")[0]):
+            query = _REDACTED
+    return urlunsplit((parsed.scheme, netloc, parsed.path, query, parsed.fragment))
+
+
+def redact_text(value: str) -> str:
+    """Remove credentials embedded in URLs without changing non-URL text."""
+
+    return _URL.sub(lambda match: _redact_url(match.group(0)), value)
+
+
+def _sensitive_values(command: Sequence[str]) -> tuple[str, ...]:
+    values: list[str] = []
+    index = 0
+    while index < len(command):
+        token = str(command[index])
+        name, equals, inline = token.partition("=")
+        if name.lower() in _SENSITIVE_OPTIONS:
+            if equals and inline:
+                values.append(inline)
+            elif index + 1 < len(command):
+                value = str(command[index + 1])
+                if value:
+                    values.append(value)
+                index += 1
+        index += 1
+    return tuple(sorted(set(values), key=len, reverse=True))
+
+
+def redact_command(command: Sequence[str]) -> tuple[str, ...]:
+    """Return a display-only argv with secret option values and URL credentials removed."""
+
+    result: list[str] = []
+    index = 0
+    while index < len(command):
+        token = str(command[index])
+        name, equals, _inline = token.partition("=")
+        if name.lower() in _SENSITIVE_OPTIONS:
+            if equals:
+                result.append(f"{name}={_REDACTED}")
+            else:
+                result.append(token)
+                if index + 1 < len(command):
+                    result.append(_REDACTED)
+                    index += 1
+        else:
+            result.append(redact_text(token))
+        index += 1
+    return tuple(result)
+
+
+def redact_diagnostic(value: str, command: Sequence[str]) -> str:
+    """Redact command-derived secrets and URL credentials from subprocess diagnostics."""
+
+    redacted = value
+    for secret in _sensitive_values(command):
+        redacted = redacted.replace(secret, _REDACTED)
+    return redact_text(redacted)
 
 
 def load_toml(path: Path) -> dict[str, Any]:

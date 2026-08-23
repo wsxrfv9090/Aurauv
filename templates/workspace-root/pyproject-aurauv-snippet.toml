@@ -17,7 +17,7 @@ imports = ["root_package", "member_package"]
 [tool.aurauv.routes.accelerator]
 default = "auto"
 detector = "pytorch"
-providers = ["pytorch"]
+providers = ["pytorch", "pytorch-companions"]
 fallbacks = { cuda = "cpu", mps = "cpu" }
 
 [tool.aurauv.routes.accelerator.options.cpu]
@@ -37,6 +37,14 @@ packages = ["torch", "torchvision"]
 extras = { cpu = "cpu", mps = "mps", cuda = "cuda" }
 indexes = { cpu = "pytorch-cpu", mps = "pytorch-cpu", cuda = "pytorch-cuda" }
 mps-requires-available = true
+
+[tool.aurauv.providers.pytorch-companions]
+type = "pytorch-companion"
+project = "."
+route = "accelerator"
+base-provider = "pytorch"
+packages = ["torchaudio", "torchcodec"]
+imports = { torchaudio = "torchaudio", torchcodec = "torchcodec" }
 
 [tool.aurauv.members.member]
 path = "modules/member"

@@ -326,6 +326,10 @@ def load_config(owner_root: Path) -> AurauvConfig:
         )
 
     for route in routes.values():
+        if len(set(route.providers)) != len(route.providers):
+            raise AurauvError(
+                f"Route {route.name!r} providers must not contain duplicates."
+            )
         for provider in route.providers:
             if provider not in providers:
                 raise AurauvError(
@@ -339,6 +343,12 @@ def load_config(owner_root: Path) -> AurauvConfig:
         if route.detector is not None and route.detector not in route.providers:
             raise AurauvError(
                 f"Route {route.name!r} detector must also occur in its providers list."
+            )
+    for provider_name, provider in providers.items():
+        if provider_name not in routes[provider.route].providers:
+            raise AurauvError(
+                f"Provider {provider_name!r} is bound to route {provider.route!r} but is not "
+                "listed in that route's providers."
             )
 
     return AurauvConfig(

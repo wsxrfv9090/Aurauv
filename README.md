@@ -522,6 +522,13 @@ uv add/remove --no-sync
 验证并写状态
 ```
 
+Aurauv在第一步之前以内存 checkpoint 记录 root/member 的 `pyproject.toml`、
+`uv.lock` 和目标 state。后续阶段失败时原子恢复这些文件；如果 routed sync
+可能已经修改环境且原 root lock 存在，再按原 lock 补偿同步。该过程不创建
+持久 `.bak/.old` 文件。若事务开始时没有 root lock，Aurauv会恢复元数据并明确
+报告环境无法安全重建，同时失效无法再证明对应当前环境的 state，而不会猜测
+旧解析结果。补偿同步失败时也遵守同一 state 失效规则。
+
 用户显式给出 `--no-sync` 时，Aurauv尊重该语义，不追加同步。
 
 ### `run`
@@ -534,15 +541,34 @@ uv run --no-sync ...
 
 执行子命令，避免 uv 在第二阶段再次用未路由的默认条件同步。
 
-子程序自己的 `--python`、`--extra`、`--project` 或 `--aura-*` 都属于子程序，不会被 Aurauv截走。
+Aurauv以首个子程序 positional argument 作为参数边界。0.1.1 的已知 uv 参数
+漂移见下文；在这些边界内不要假定所有未来 uv 选项都已被 wrapper 理解。
 
 ### `--dry-run` / `--check` / `--locked` / `--frozen` / `--offline`
 
-这些约束会继续传给 uv。只读模式不会顺手写 Aurauv state，也不会借检查之名刷新 member lock。
+这些约束会继续原样传给 uv。`--locked` / `--frozen` 仍允许 uv 按自身语义同步
+环境，但不会触发 Aurauv 自身的 uv update、Python install、member lock refresh、
+provider repair/resync 或 state 写入。`--check` / `--dry-run` 同样遵守该副作用边界。
 
 ### `--all-extras`
 
 受管 route 使用 mutually exclusive extras（互斥 extras）时，Aurauv拒绝 `--all-extras`，因为它会破坏“每个 route 恰好一个 option”的合同。
+
+### 0.1.1 已知 uv 参数漂移（本版本仅声明）
+
+Aurauv为 `add/remove/run` 重建 routed sync 时维护显式参数表。当前已知以下 uv
+0.12.5 语义尚未完整建模，本版本不修改它们：
+
+- `uv run` 子程序参数若恰好包含 `--isolated`、`--no-project`、`--script` 或
+  `--gui-script`，可能被提前识别为 uv run 选项；
+- `uv add --optional NAME PACKAGE` 会把依赖写入 optional extra，但 follow-up
+  routed sync 尚不会自动转换为 `sync --extra NAME`；
+- follow-up sync 尚未复制 `--no-editable-package`、`--no-install-project`、
+  `--no-install-workspace`、`--no-install-local`、`--no-install-package`、
+  `--upgrade-group`、`--prerelease-package`、`--system-certs` 和项目型 `--script`。
+
+需要这些参数的精确原生语义时，应使用 `--aura-no-route` 明确直通 uv，并由调用者
+另行执行 reviewed routed sync；不要把直通视为已经保留了 Aurauv route。
 
 ---
 
@@ -622,7 +648,7 @@ imports = ["my_package"]
 [tool.aurauv.routes.accelerator]
 default = "auto"
 detector = "pytorch"
-providers = ["pytorch"]
+providers = ["pytorch", "pytorch-companions"]
 fallbacks = { cuda = "cpu", mps = "cpu" }
 
 [tool.aurauv.routes.accelerator.options.cpu]
@@ -642,6 +668,14 @@ packages = ["torch", "torchvision"]
 extras = { cpu = "cpu", mps = "mps", cuda = "cuda" }
 indexes = { cpu = "pytorch-cpu", mps = "pytorch-cpu", cuda = "pytorch-cuda" }
 mps-requires-available = true
+
+[tool.aurauv.providers.pytorch-companions]
+type = "pytorch-companion"
+project = "."
+route = "accelerator"
+base-provider = "pytorch"
+packages = ["torchaudio", "torchcodec"]
+imports = { torchaudio = "torchaudio", torchcodec = "torchcodec" }
 ```
 
 完整 standalone、workspace root 和 workspace member 模板见：

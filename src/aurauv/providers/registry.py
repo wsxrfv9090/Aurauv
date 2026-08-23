@@ -7,10 +7,12 @@ from ..models import AurauvConfig, ProviderSpec
 from ..process import CommandRunner
 from .base import Provider
 from .pytorch import PytorchProvider
+from .pytorch_companion import PytorchCompanionProvider
 
 
 _PROVIDER_TYPES = {
     "pytorch": PytorchProvider,
+    "pytorch-companion": PytorchCompanionProvider,
 }
 
 

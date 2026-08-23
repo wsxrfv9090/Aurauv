@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.1 — 2026-08-23
+
+- 命令与失败诊断中的 token、密码、URL userinfo 和敏感查询参数脱敏。
+- 新增同 accelerator route 的可选 PyTorch companion provider。
+- 实际安装的 `torchaudio`、`torchcodec` 可进入 runtime verification 与 state。
+- `--locked` / `--frozen` 禁止 Aurauv 自身更新、安装、repair、resync 和 state 写入。
+- provider 必须且只能按声明顺序挂接到所属 route。
+- `add/remove` 多阶段失败时恢复项目元数据、lock、state，并在可行时补偿同步环境。
+
 ## 0.1.0 — 2026-08-21
 
 - 首次可交付版本。

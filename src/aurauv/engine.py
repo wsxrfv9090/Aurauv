@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import dataclass, replace
 import json
 import os
 from pathlib import Path
@@ -47,6 +47,7 @@ from .state import (
     write_state,
 )
 from .topology import discover_topology
+from .transaction import MetadataTransaction
 from .utils import (
     command_text,
     contains_option,
@@ -61,7 +62,7 @@ from .utils import (
 
 _MANAGED_COMMANDS = {"sync", "run", "add", "remove", "lock", "export", "tree"}
 _ROUTED_COMMANDS = {"sync", "run", "export"}
-_READ_ONLY_SYNC_FLAGS = {"--check", "--dry-run"}
+_AURA_READ_ONLY_FLAGS = {"--check", "--dry-run", "--locked", "--frozen"}
 _MEMBER_CHECK_ONLY_FLAGS = {"--check", "--dry-run", "--locked", "--frozen"}
 _RUN_EPHEMERAL_FLAGS = {"--no-project", "--isolated", "--script", "--gui-script"}
 
@@ -119,6 +120,20 @@ _SYNC_COPY_FLAGS = (
 )
 
 
+@dataclass(frozen=True, slots=True)
+class ExecutionCapabilities:
+    may_update_uv: bool
+    may_install_python: bool
+    may_refresh_member_locks: bool
+    may_repair_providers: bool
+    may_resync_fallback: bool
+    may_write_state: bool
+
+
+_FULL_CAPABILITIES = ExecutionCapabilities(True, True, True, True, True, True)
+_READ_ONLY_CAPABILITIES = ExecutionCapabilities(False, False, False, False, False, False)
+
+
 class AurauvEngine:
     def __init__(
         self,
@@ -139,12 +154,27 @@ class AurauvEngine:
         self.environment: EnvironmentIdentity | None = None
         self.uv_version_text = ""
         self.effective_aura = parsed.aura
+        self.capabilities = _FULL_CAPABILITIES
+
+    def _execution_capabilities(self) -> ExecutionCapabilities:
+        option_view = (
+            self._run_option_view()
+            if self.parsed.command == "run"
+            else self.parsed.uv_args
+        )
+        if any(contains_option(option_view, flag) for flag in _AURA_READ_ONLY_FLAGS):
+            return _READ_ONLY_CAPABILITIES
+        return _FULL_CAPABILITIES
 
     def _prepare_project(
-        self, *, target: str | None = None, read_only: bool = False
+        self,
+        *,
+        target: str | None = None,
+        capabilities: ExecutionCapabilities | None = None,
     ) -> None:
         if self.topology is not None:
             return
+        self.capabilities = capabilities or self.capabilities
         topology_args = (
             self._run_option_view()
             if self.parsed.command == "run"
@@ -200,15 +230,24 @@ class AurauvEngine:
             )
         self.topology = topology
         self.config = config
-        self.effective_aura = (
-            replace(
-                self.parsed.aura,
-                install_python=False,
-                update_uv=False,
-                no_input=True,
-            )
-            if read_only
-            else self.parsed.aura
+        self.effective_aura = replace(
+            self.parsed.aura,
+            install_python=(
+                self.parsed.aura.install_python
+                if self.capabilities.may_install_python
+                else False
+            ),
+            update_uv=(
+                self.parsed.aura.update_uv
+                if self.capabilities.may_update_uv
+                else False
+            ),
+            no_input=(
+                self.parsed.aura.no_input
+                if self.capabilities.may_install_python
+                or self.capabilities.may_update_uv
+                else True
+            ),
         )
         self.uv_version_text = ensure_uv_version(
             self.uv, config, self.effective_aura, self.runner
@@ -524,30 +563,34 @@ class AurauvEngine:
             )
         results: dict[str, dict[str, Any]] = {}
         repaired = False
-        for provider_name, provider in self.providers.items():
-            option = selections[provider.spec.route].selected
-            try:
-                verified = provider.verify(python, option=option, cwd=self.cfg.owner_root)
-            except ProviderVerificationError as failure:
-                if allow_repair and failure.repairable and not repaired:
-                    packages = provider.protected_packages()
-                    warn(
-                        f"{failure}; retrying one routed uv sync with focused reinstall of "
-                        f"{', '.join(packages)}."
-                    )
-                    self._run_uv(
-                        self._fresh_sync_args(
-                            selections, reinstall_packages=packages
-                        ),
-                        cwd=self.cfg.owner_root,
-                    )
-                    repaired = True
+        for route_name, route in self.cfg.routes.items():
+            option = selections[route_name].selected
+            for provider_name in route.providers:
+                provider = self.providers[provider_name]
+                try:
                     verified = provider.verify(
                         python, option=option, cwd=self.cfg.owner_root
                     )
-                else:
-                    raise
-            results[provider_name] = verified.details
+                except ProviderVerificationError as failure:
+                    if allow_repair and failure.repairable and not repaired:
+                        packages = provider.protected_packages()
+                        warn(
+                            f"{failure}; retrying one routed uv sync with focused reinstall of "
+                            f"{', '.join(packages)}."
+                        )
+                        self._run_uv(
+                            self._fresh_sync_args(
+                                selections, reinstall_packages=packages
+                            ),
+                            cwd=self.cfg.owner_root,
+                        )
+                        repaired = True
+                        verified = provider.verify(
+                            python, option=option, cwd=self.cfg.owner_root
+                        )
+                    else:
+                        raise
+                results[provider_name] = verified.details
         self._verify_imports(python)
         return results
 
@@ -617,6 +660,8 @@ class AurauvEngine:
         selections: dict[str, RouteSelection],
         provider_results: dict[str, dict[str, Any]],
     ) -> None:
+        if not self.capabilities.may_write_state:
+            raise AurauvError("Read-only execution cannot write Aurauv state.")
         path = write_state(
             self.cfg,
             self.topo,
@@ -651,14 +696,8 @@ class AurauvEngine:
         ):
             info("Ephemeral/no-project uv run detected; passing through without project routing.")
             return self.passthrough()
-        read_only_prepare = (
-            command == "sync"
-            and any(
-                contains_option(self.parsed.uv_args, flag)
-                for flag in _READ_ONLY_SYNC_FLAGS
-            )
-        ) or (command == "lock" and contains_option(self.parsed.uv_args, "--check"))
-        self._prepare_project(read_only=read_only_prepare)
+        capabilities = self._execution_capabilities()
+        self._prepare_project(capabilities=capabilities)
         if command == "sync":
             return self._execute_sync()
         if command == "run":
@@ -678,7 +717,7 @@ class AurauvEngine:
         selections = self._select()
         check_only_members = any(
             contains_option(self.parsed.uv_args, flag) for flag in _MEMBER_CHECK_ONLY_FLAGS
-        )
+        ) or not self.capabilities.may_refresh_member_locks
         self._reconcile_members(all_members=True, check_only=check_only_members)
         args = self._routed_args(
             self.parsed.uv_args,
@@ -687,17 +726,14 @@ class AurauvEngine:
             owner_project=True,
         )
         self._run_uv(args)
-        read_only = any(
-            contains_option(args, flag) for flag in _READ_ONLY_SYNC_FLAGS
-        )
         if contains_option(args, "--dry-run"):
             return 0
         selections, provider_results = self._verify_with_runtime_fallback(
             selections,
-            allow_repair=not read_only,
-            allow_resync=not read_only,
+            allow_repair=self.capabilities.may_repair_providers,
+            allow_resync=self.capabilities.may_resync_fallback,
         )
-        if not read_only:
+        if self.capabilities.may_write_state:
             self._write_state(selections, provider_results)
         return 0
 
@@ -717,10 +753,10 @@ class AurauvEngine:
             )
         selections, provider_results = self._verify_with_runtime_fallback(
             selections,
-            allow_repair=not no_sync,
-            allow_resync=not no_sync,
+            allow_repair=self.capabilities.may_repair_providers and not no_sync,
+            allow_resync=self.capabilities.may_resync_fallback and not no_sync,
         )
-        if not no_sync:
+        if not no_sync and self.capabilities.may_write_state:
             self._write_state(selections, provider_results)
         routed = self._routed_args(
             self.parsed.uv_args,
@@ -739,49 +775,158 @@ class AurauvEngine:
         )
         return completed.returncode
 
+    def _mutation_transaction_paths(self) -> tuple[Path, ...]:
+        project_roots = {
+            self.cfg.owner_root,
+            self.topo.invocation_root,
+            *self.topo.uv_workspace_members,
+            *(member.path for member in self.cfg.members.values()),
+        }
+        paths: list[Path] = []
+        for project_root in sorted(project_roots):
+            paths.extend((project_root / "pyproject.toml", project_root / "uv.lock"))
+        paths.append(self.env_identity.state_path)
+        return tuple(dict.fromkeys(paths))
+
+    def _rollback_sync_args(
+        self, selections: dict[str, RouteSelection]
+    ) -> list[str]:
+        args = ["sync", "--locked", "--project", str(self.cfg.owner_root)]
+        for extra in selected_extras(self.cfg, selections):
+            args.extend(("--extra", extra))
+        if contains_option(self.parsed.uv_args, "--offline"):
+            args.insert(0, "--offline")
+        return args
+
+    def _rollback_mutation(
+        self,
+        transaction: MetadataTransaction,
+        *,
+        selections: dict[str, RouteSelection] | None,
+        environment_may_have_changed: bool,
+        failure: BaseException,
+    ) -> None:
+        root_lock = self.cfg.owner_root / "uv.lock"
+        try:
+            restored = transaction.rollback()
+        except AurauvError as rollback_error:
+            invalidation = (
+                self._invalidate_transaction_state()
+                if environment_may_have_changed
+                else ""
+            )
+            raise AurauvError(
+                f"Mutation failed ({failure}) and metadata rollback also failed: "
+                f"{rollback_error}{invalidation}"
+            ) from failure
+        if restored:
+            info("Restored mutation metadata: " + ", ".join(str(path) for path in restored))
+        if not environment_may_have_changed:
+            return
+        if selections is None or not transaction.existed(root_lock):
+            invalidation = self._invalidate_transaction_state()
+            raise AurauvError(
+                f"Mutation failed ({failure}). Metadata was restored, but the transaction "
+                "started without a root uv.lock, so Aurauv could not safely reconstruct the "
+                "previous environment. Run a reviewed routed sync before continuing."
+                f"{invalidation}"
+            ) from failure
+        try:
+            self._run_uv(self._rollback_sync_args(selections), cwd=self.cfg.owner_root)
+        except (AurauvError, CommandError) as rollback_error:
+            invalidation = self._invalidate_transaction_state()
+            raise AurauvError(
+                f"Mutation failed ({failure}). Metadata was restored, but environment rollback "
+                f"from the original root lock failed: {rollback_error}{invalidation}"
+            ) from failure
+        info("Restored the managed environment from the original root uv.lock.")
+
+    def _invalidate_transaction_state(self) -> str:
+        path = self.env_identity.state_path
+        existed = path.exists() or path.is_symlink()
+        try:
+            path.unlink(missing_ok=True)
+        except OSError as exc:
+            return f" Aurauv also could not invalidate state {path}: {exc}."
+        if existed:
+            return f" Aurauv invalidated restored state {path}."
+        return ""
+
     def _execute_mutation(self, command: str) -> int:
         assert self.parsed.command_index is not None
+        transaction = MetadataTransaction(self._mutation_transaction_paths())
+        sync_selections: dict[str, RouteSelection] | None = None
+        environment_may_have_changed = False
+        rollback_attempted = False
         user_no_sync = contains_option(self.parsed.uv_args, "--no-sync")
-        if user_no_sync:
-            completed = self.runner.run(
-                [str(self.uv), *self.parsed.uv_args],
-                cwd=self.cwd,
-                allowed_exit_codes=tuple(range(0, 256)),
-                env=self._child_env(),
-            )
-            if completed.returncode == 0:
+        try:
+            if user_no_sync:
+                completed = self.runner.run(
+                    [str(self.uv), *self.parsed.uv_args],
+                    cwd=self.cwd,
+                    allowed_exit_codes=tuple(range(0, 256)),
+                    env=self._child_env(),
+                )
+                if completed.returncode != 0:
+                    rollback_attempted = True
+                    self._rollback_mutation(
+                        transaction,
+                        selections=None,
+                        environment_may_have_changed=False,
+                        failure=AurauvError(
+                            f"uv {command} exited with code {completed.returncode}"
+                        ),
+                    )
+                    return completed.returncode
                 self._reconcile_members(
                     all_members=False,
-                    check_only=any(
+                    check_only=not self.capabilities.may_refresh_member_locks or any(
                         contains_option(self.parsed.uv_args, flag)
-                        for flag in {"--locked", "--frozen"}
+                        for flag in ("--locked", "--frozen")
                     ),
                 )
-            return completed.returncode
+                transaction.commit()
+                return 0
 
-        mutation_args = insert_after_command(
-            self.parsed.uv_args, self.parsed.command_index, ["--no-sync"]
-        )
-        self._run_uv(mutation_args)
-        self._reconcile_members(
-            all_members=False,
-            check_only=any(
-                contains_option(self.parsed.uv_args, flag)
-                for flag in {"--locked", "--frozen"}
-            ),
-        )
-        selections = self._select()
-        self._run_uv(self._fresh_sync_args(selections), cwd=self.cfg.owner_root)
-        selections, results = self._verify_with_runtime_fallback(
-            selections, allow_repair=True, allow_resync=True
-        )
-        self._write_state(selections, results)
-        return 0
+            mutation_args = insert_after_command(
+                self.parsed.uv_args, self.parsed.command_index, ["--no-sync"]
+            )
+            self._run_uv(mutation_args)
+            self._reconcile_members(
+                all_members=False,
+                check_only=not self.capabilities.may_refresh_member_locks or any(
+                    contains_option(self.parsed.uv_args, flag)
+                    for flag in ("--locked", "--frozen")
+                ),
+            )
+            sync_selections = self._select()
+            environment_may_have_changed = True
+            self._run_uv(
+                self._fresh_sync_args(sync_selections), cwd=self.cfg.owner_root
+            )
+            selections, results = self._verify_with_runtime_fallback(
+                sync_selections,
+                allow_repair=self.capabilities.may_repair_providers,
+                allow_resync=self.capabilities.may_resync_fallback,
+            )
+            if self.capabilities.may_write_state:
+                self._write_state(selections, results)
+            transaction.commit()
+            return 0
+        except BaseException as failure:
+            if not rollback_attempted:
+                self._rollback_mutation(
+                    transaction,
+                    selections=sync_selections,
+                    environment_may_have_changed=environment_may_have_changed,
+                    failure=failure,
+                )
+            raise
 
     def _execute_lock(self) -> int:
         check_only = any(
             contains_option(self.parsed.uv_args, flag) for flag in _MEMBER_CHECK_ONLY_FLAGS
-        )
+        ) or not self.capabilities.may_refresh_member_locks
         self._run_uv(self.parsed.uv_args)
         self._reconcile_members(all_members=True, check_only=check_only)
         return 0
@@ -811,7 +956,7 @@ class AurauvEngine:
         return 0
 
     def status(self) -> dict[str, Any]:
-        self._prepare_project(read_only=True)
+        self._prepare_project(capabilities=_READ_ONLY_CAPABILITIES)
         selections = self._select()
         payload = {
             "aurauv": {
@@ -868,7 +1013,7 @@ class AurauvEngine:
         return payload
 
     def doctor(self) -> int:
-        self._prepare_project(read_only=True)
+        self._prepare_project(capabilities=_READ_ONLY_CAPABILITIES)
         selections = self._select()
         self._reconcile_members(all_members=True, check_only=True)
         sync_args = self._fresh_sync_args(selections, no_sync=True)
@@ -880,7 +1025,9 @@ class AurauvEngine:
         return 0
 
     def lock_members(self, *, check_only: bool) -> int:
-        self._prepare_project(read_only=check_only)
+        self._prepare_project(
+            capabilities=_READ_ONLY_CAPABILITIES if check_only else _FULL_CAPABILITIES
+        )
         self._reconcile_members(all_members=True, check_only=check_only)
         return 0
 

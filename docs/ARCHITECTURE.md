@@ -159,6 +159,10 @@ python / tool / pip / build / publish / cache / self / ...
 - uv self-update；
 - provider repair/resync。
 
+`--locked` / `--frozen` 不改变 uv 自身是否同步环境的定义；该边界限制的是 Aurauv
+额外副作用。实现使用显式 execution capabilities，而不是把 lock 约束等同于
+“uv 什么都不写”。
+
 ## 5. Provider 边界
 
 Provider拥有包族知识：
@@ -189,6 +193,12 @@ PyTorch provider 校验：
 - CUDA 预期 runtime 从唯一 index URL 推导；
 - 安装后验证 distribution、import、CUDA/MPS runtime。
 
+同 route 可在基础 `pytorch` provider 后挂接 `pytorch-companion`。companion 不检测
+机器、不新增 extra、不替 uv 解释 lock marker；它在 sync/check 后按 managed
+interpreter 中实际存在的 distribution 激活。`torchaudio`、`torchcodec` 等出现时，
+其 distribution/module version、backend 与 import 结果进入 provider state；缺席时
+明确记录 inactive。基础 provider 与 companion 的执行顺序来自 route.providers。
+
 ## 7. Member standalone lock
 
 workspace 根 lock 与 member 独立 clone lock 是两个合同。
@@ -201,7 +211,23 @@ workspace 根 lock 与 member 独立 clone lock 是两个合同。
 4. 只在内容变化时原子替换 member `uv.lock`；
 5. 遇到 path/workspace sources 或 nested workspace 时拒绝猜测。
 
-## 8. 扩展原则
+## 8. add/remove 事务边界
+
+Aurauv在 `uv add/remove --no-sync` 前以内存 checkpoint 记录 owner、invocation root、
+workspace members 的 `pyproject.toml`/`uv.lock` 以及目标 state。后续 member lock、
+root sync、provider/project verification 或 state 写入失败时：
+
+1. 原子恢复精确文件内容和 mode；
+2. 删除本事务新建的 tracked metadata 文件；
+3. 如果环境可能已变化且原 root lock 存在，按原 route extras执行补偿
+   `uv sync --locked`；
+4. 无原 root lock 或补偿同步失败时，只恢复可证明的元数据、失效无法再证明的
+   state，并明确报告环境恢复边界。
+
+事务不复制 `.venv`，不创建持久 backup，也不替代 uv lock。命令执行期间并发手工
+修改同一 metadata 文件不属于支持的事务模型。
+
+## 9. 扩展原则
 
 新增 Triton 或 GUI/headless provider 时，优先新增 route/provider，不修改：
 

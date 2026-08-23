@@ -37,6 +37,26 @@ from aurauv.providers.base import Provider
 
 如果新包与 accelerator 必须严格同选，例如某包的 CUDA wheel 必须和 PyTorch CUDA 一致，可以挂接 `accelerator` route。
 
+同 route provider 必须按依赖顺序声明。基础 detector 在前，非 detector companion
+在后，例如：
+
+```toml
+[tool.aurauv.routes.accelerator]
+detector = "pytorch"
+providers = ["pytorch", "pytorch-companions"]
+
+[tool.aurauv.providers.pytorch-companions]
+type = "pytorch-companion"
+project = "."
+route = "accelerator"
+base-provider = "pytorch"
+packages = ["torchaudio", "torchcodec"]
+```
+
+可选 companion 不应仅凭 raw lock membership 激活，因为一个 `uv.lock` 可同时包含
+多个 marker/extra 分支。让 uv 负责选定并同步环境，再根据 managed interpreter 中
+实际安装的 distribution 激活验证，避免在 provider 中重写 resolver。
+
 如果它是独立维度，例如 Linux 上启用 Triton、其他平台禁用，应建立独立 route：
 
 ```toml
@@ -81,3 +101,7 @@ extras = ["triton-disabled"]
 - 安装后 backend/version/runtime 验证；
 - state machine 在机器签名变化后重新检测；
 - current interpreter 路径。
+
+按安装状态激活的 companion 还必须测试：未安装 no-op、实际安装包进入 state、
+import/backend mismatch、focused repair 只覆盖 active packages，以及 base provider
+先于 companion 执行。

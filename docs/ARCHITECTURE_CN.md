@@ -61,7 +61,9 @@ fallback来源只能是：
 
 ### 2.5 路由参数与 uv 参数分离
 
-Aurauv只解析放在 uv 子命令之前的 `--aura-*`。一旦识别 uv 子命令，后续参数全部保留给 uv 或子程序，尤其是 `uv run` 的 child arguments。
+Aurauv只解析放在 uv 子命令之前的 `--aura-*`。一旦识别 uv 子命令，后续参数保留给
+uv 或子程序；0.1.1 已知的 child/uv 参数表漂移单独记录在 README，本次安全修复
+不改变这些转发语义。
 
 ## 3. 分层
 
@@ -75,9 +77,11 @@ cli.py
           ├── runtime.py  uv/Python 授权
           ├── state.py    per-environment 持久状态
           ├── member_lock.py standalone member lock 协议
+          ├── transaction.py add/remove metadata checkpoint
           └── providers/
               ├── base.py
-              └── pytorch.py
+              ├── pytorch.py
+              └── pytorch_companion.py
 ```
 
 ## 4. route 与 provider 的职责边界
@@ -90,7 +94,7 @@ options
 option -> root extras
 default/detector
 fallback graph
-provider list
+有序且无重复的 provider list
 ```
 
 Provider描述某一包族如何实现和验证选择：
@@ -109,6 +113,8 @@ current-interpreter 安装参数
 ```
 
 核心不知道 `torch`、`cu132`、`nvidia-smi` 或 MPS；这些只存在于 PyTorch provider。
+`pytorch-companion` 可在同 route 的基础 provider 后验证实际安装的 `torchaudio`、
+`torchcodec`，缺席时 no-op，出现时把 distribution/module/backend 证据写入 state。
 
 ## 5. 成员 lock 协议
 
@@ -140,13 +146,16 @@ none           不发布 standalone lock
 | uv 命令 | Aurauv 行为 |
 |---|---|
 | `sync` | 注入 route extras；根 owner sync；验证；写状态 |
-| `add/remove` | 先 `--no-sync` 修改 metadata，再 routed sync |
+| `add/remove` | checkpoint 后以 `--no-sync` 修改 metadata，再 routed sync；后续失败则恢复 metadata/lock/state，并在原 root lock 存在时补偿同步环境；环境无法证明恢复时失效 state |
 | `run` | routed inexact pre-sync，再 `run --no-sync` |
 | `lock` | 原样根 lock，随后检查/维护 member standalone locks |
 | `export/tree` | 注入 route extras并转发 |
 | 其他命令 | 原样 passthrough |
 
 `--aura-no-route` 对所有 uv 命令直接 passthrough。
+
+`--locked` / `--frozen` 继续传给 uv，但 execution capabilities 禁止 Aurauv 自身
+update/install/member refresh/provider repair/resync/state write。正常命令的原有能力不变。
 
 ## 7. 当前 interpreter 例外
 
