@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-EXPECTED_VERSION = "aurauv 0.1.1"
+EXPECTED_VERSION = "aurauv 0.1.2"
 TEMPLATE_KINDS = ("standalone", "workspace-member", "workspace-root")
 TRACKED_ARCHIVES = (
     REPO_ROOT / "bootstrap" / "aurauv.pyz",
@@ -102,8 +102,12 @@ def test_template_launcher_copies_and_windows_forwarding_contract_are_current() 
     assert 'set "SETUP=%~dp0setup.py"' in setup_bat
     assert '"%SETUP%" %*' in setup_bat
     assert "exit /b %ERRORLEVEL%" in setup_bat
+    assert setup_bat.count("sys.version_info < (3, 11)") == 3
+    assert "sys.version_info ^< (3, 11)" not in setup_bat
 
     bootstrap_bat = (REPO_ROOT / "bootstrap" / "aurauv.bat").read_text(encoding="utf-8")
     assert 'set "ENTRY=%~dp0aurauv.py"' in bootstrap_bat
     assert '"%ENTRY%" %*' in bootstrap_bat
     assert "where uv >nul 2>nul" in bootstrap_bat
+    assert bootstrap_bat.count("sys.version_info < (3, 11)") == 3
+    assert "sys.version_info ^< (3, 11)" not in bootstrap_bat

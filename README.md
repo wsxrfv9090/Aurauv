@@ -541,7 +541,7 @@ uv run --no-sync ...
 
 执行子命令，避免 uv 在第二阶段再次用未路由的默认条件同步。
 
-Aurauv以首个子程序 positional argument 作为参数边界。0.1.1 的已知 uv 参数
+Aurauv以首个子程序 positional argument 作为参数边界。0.1.2 的已知 uv 参数
 漂移见下文；在这些边界内不要假定所有未来 uv 选项都已被 wrapper 理解。
 
 ### `--dry-run` / `--check` / `--locked` / `--frozen` / `--offline`
@@ -554,7 +554,7 @@ provider repair/resync 或 state 写入。`--check` / `--dry-run` 同样遵守�
 
 受管 route 使用 mutually exclusive extras（互斥 extras）时，Aurauv拒绝 `--all-extras`，因为它会破坏“每个 route 恰好一个 option”的合同。
 
-### 0.1.1 已知 uv 参数漂移（本版本仅声明）
+### 0.1.2 已知 uv 参数漂移（本版本仅声明）
 
 Aurauv为 `add/remove/run` 重建 routed sync 时维护显式参数表。当前已知以下 uv
 0.12.5 语义尚未完整建模，本版本不修改它们：
@@ -763,7 +763,7 @@ Aurauv当前不会：
 - 自动猜测未来 Triton、OpenCV GUI/headless、ROCm 或 XPU 合同；
 - 保证尚未在真实硬件执行过的 CUDA/MPS runtime 可用。
 
-本仓库的测试覆盖参数边界、拓扑、member lock、授权模型、状态、offline uv 集成和 zipapp。真实 RTX 4070、Apple MPS、Windows launcher 和 Colab kernel 仍需在对应设备做首次验收。
+本仓库的测试覆盖参数边界、拓扑、member lock、授权模型、状态、offline uv 集成和 zipapp。Windows 11 已验收 `python` 位于 `PATH` 时的 wheel、portable BAT、deployment BAT 与只读 sync；`AURAUV_BOOTSTRAP_PYTHON`、`py -3` 等分支仍需 Windows CI 持续覆盖。真实 RTX 4070、Apple MPS 和 Colab kernel 仍需在对应设备做首次验收。
 
 ---
 

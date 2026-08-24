@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.2 — 2026-08-24
+
+- 修复 Windows BAT 启动器把 Python 版本比较中的 `^` 传入解释器而误报缺少 Python。
+- 增加 BAT Python 版本检测表达式的发行物回归约束。
+
 ## 0.1.1 — 2026-08-23
 
 - 命令与失败诊断中的 token、密码、URL userinfo 和敏感查询参数脱敏。

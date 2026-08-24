@@ -10,7 +10,7 @@ if errorlevel 1 (
 
 set "ENTRY=%~dp0aurauv.py"
 if defined AURAUV_BOOTSTRAP_PYTHON (
-  "%AURAUV_BOOTSTRAP_PYTHON%" -c "import sys; raise SystemExit(sys.version_info ^< (3, 11))" >nul 2>nul
+  "%AURAUV_BOOTSTRAP_PYTHON%" -c "import sys; raise SystemExit(sys.version_info < (3, 11))" >nul 2>nul
   if not errorlevel 1 (
     "%AURAUV_BOOTSTRAP_PYTHON%" "%ENTRY%" %*
     exit /b %ERRORLEVEL%
@@ -18,7 +18,7 @@ if defined AURAUV_BOOTSTRAP_PYTHON (
 )
 where py >nul 2>nul
 if not errorlevel 1 (
-  py -3 -c "import sys; raise SystemExit(sys.version_info ^< (3, 11))" >nul 2>nul
+  py -3 -c "import sys; raise SystemExit(sys.version_info < (3, 11))" >nul 2>nul
   if not errorlevel 1 (
     py -3 "%ENTRY%" %*
     exit /b %ERRORLEVEL%
@@ -26,7 +26,7 @@ if not errorlevel 1 (
 )
 where python >nul 2>nul
 if not errorlevel 1 (
-  python -c "import sys; raise SystemExit(sys.version_info ^< (3, 11))" >nul 2>nul
+  python -c "import sys; raise SystemExit(sys.version_info < (3, 11))" >nul 2>nul
   if not errorlevel 1 (
     python "%ENTRY%" %*
     exit /b %ERRORLEVEL%
