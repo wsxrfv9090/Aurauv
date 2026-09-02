@@ -110,6 +110,167 @@ extras = ["b"]
     assert payload["route_selections"]["runtime"]["selected"] == "a"
 
 
+def _exclusive_distribution_project(tmp_path: Path) -> Path:
+    wheels = tmp_path / "exclusive-wheels"
+    wheels.mkdir()
+    gui = make_wheel(wheels, "vision-gui", "shared_cv")
+    headless = make_wheel(wheels, "vision-headless", "shared_cv")
+    project = tmp_path / "exclusive-project"
+    project.mkdir()
+    (project / "pyproject.toml").write_text(
+        f'''[project]
+name = "exclusive-integration"
+version = "0.1.0"
+requires-python = ">=3.11"
+
+[project.optional-dependencies]
+vision-gui = ["vision-gui @ {gui.as_uri()}"]
+vision-headless = ["vision-headless @ {headless.as_uri()}"]
+
+[tool.uv]
+package = false
+conflicts = [[{{ extra = "vision-gui" }}, {{ extra = "vision-headless" }}]]
+
+[tool.aurauv]
+schema-version = 1
+minimum-uv = "0.10.0"
+python-install-policy = "never"
+uv-update-policy = "never"
+
+[tool.aurauv.routes.vision-runtime]
+default = "headless"
+providers = ["vision"]
+
+[tool.aurauv.routes.vision-runtime.options.gui]
+extras = ["vision-gui"]
+
+[tool.aurauv.routes.vision-runtime.options.headless]
+extras = ["vision-headless"]
+
+[tool.aurauv.providers.vision]
+type = "exclusive-distribution"
+route = "vision-runtime"
+family = ["vision-gui", "vision-headless"]
+selections = {{ gui = "vision-gui", headless = "vision-headless" }}
+module = "shared_cv"
+required-attributes = {{ gui = ["VALUE"], headless = ["VALUE"] }}
+''',
+        encoding="utf-8",
+    )
+    return project
+
+
+def test_exclusive_distribution_route_switches_shared_import_wheels(
+    tmp_path: Path, uv_path: Path
+) -> None:
+    project = _exclusive_distribution_project(tmp_path)
+
+    sync = _run(project, uv_path, "--offline", "sync")
+    assert sync.returncode == 0, sync.stderr + sync.stdout
+    python = project / ".venv/bin/python"
+    headless_probe = subprocess.run(
+        [
+            python,
+            "-c",
+            "import importlib.metadata as m, shared_cv; "
+            "print(m.version('vision-headless'), shared_cv.VALUE)",
+        ],
+        check=False,
+        text=True,
+        capture_output=True,
+    )
+    assert headless_probe.returncode == 0, headless_probe.stderr
+    assert "shared_cv" in headless_probe.stdout
+    assert subprocess.run(
+        [python, "-c", "import importlib.metadata as m; m.version('vision-gui')"],
+        check=False,
+    ).returncode != 0
+
+    switched = _run(
+        project,
+        uv_path,
+        "--offline",
+        "--aura-route",
+        "vision-runtime=gui",
+        "sync",
+    )
+    assert switched.returncode == 0, switched.stderr + switched.stdout
+    assert subprocess.run(
+        [python, "-c", "import importlib.metadata as m; m.version('vision-gui')"],
+        check=False,
+    ).returncode == 0
+    assert subprocess.run(
+        [python, "-c", "import importlib.metadata as m; m.version('vision-headless')"],
+        check=False,
+    ).returncode != 0
+
+
+def test_exclusive_distribution_provider_verifies_current_interpreter_target(
+    tmp_path: Path, uv_path: Path
+) -> None:
+    project = _exclusive_distribution_project(tmp_path)
+    locked = subprocess.run(
+        [str(uv_path), "--offline", "lock", "--project", str(project)],
+        cwd=project,
+        check=False,
+        text=True,
+        capture_output=True,
+    )
+    assert locked.returncode == 0, locked.stderr + locked.stdout
+    kernel = tmp_path / "exclusive-kernel"
+    created = subprocess.run(
+        [str(uv_path), "venv", "--python", sys.executable, str(kernel)],
+        cwd=tmp_path,
+        check=False,
+        text=True,
+        capture_output=True,
+    )
+    assert created.returncode == 0, created.stderr + created.stdout
+    kernel_python = kernel / "bin/python"
+    env = {
+        **os.environ,
+        "PYTHONPATH": str(REPO_ROOT / "src"),
+        "AURAUV_UV": str(uv_path),
+    }
+    result = subprocess.run(
+        [
+            str(kernel_python),
+            "-m",
+            "aurauv",
+            "--offline",
+            "--aura-target",
+            "current",
+            "aura",
+            "bootstrap",
+        ],
+        cwd=project,
+        env=env,
+        check=False,
+        text=True,
+        capture_output=True,
+    )
+    assert result.returncode == 0, result.stderr + result.stdout
+    probe = subprocess.run(
+        [
+            str(kernel_python),
+            "-c",
+            "import importlib.metadata as m, shared_cv; "
+            "print(m.version('vision-headless'), shared_cv.VALUE)",
+        ],
+        check=False,
+        text=True,
+        capture_output=True,
+    )
+    assert probe.returncode == 0, probe.stderr
+    states = list((project / ".aurauv/state").glob("*.json"))
+    assert len(states) == 1
+    payload = json.loads(states[0].read_text(encoding="utf-8"))
+    assert payload["environment_target"] == "current"
+    assert payload["provider_results"]["vision"]["selected_distribution"] == (
+        "vision-headless"
+    )
+
+
 def test_uv_version_passthrough_does_not_require_project(tmp_path: Path, uv_path: Path) -> None:
     result = _run(tmp_path, uv_path, "--version")
     assert result.returncode == 0

@@ -199,7 +199,15 @@ interpreter 中实际存在的 distribution 激活。`torchaudio`、`torchcodec`
 其 distribution/module version、backend 与 import 结果进入 provider state；缺席时
 明确记录 inactive。基础 provider 与 companion 的执行顺序来自 route.providers。
 
-## 7. Member standalone lock
+## 7. Exclusive distribution 当前实现
+
+`exclusive-distribution` provider 管理共享同一 import module 的互斥 wheel。项目
+声明完整 `family`、每个 option 唯一选择的 distribution、共享 module 和可选能力
+属性。provider 合同要求所选 distribution 直接来自 route extra；runtime verification
+读取目标解释器 metadata，要求 family 中恰好只有所选成员，再执行 import/attribute
+probe。包族不唯一不会触发 fallback 或自动修补，依赖修正必须留在 uv metadata/lock。
+
+## 8. Member standalone lock
 
 workspace 根 lock 与 member 独立 clone lock 是两个合同。
 
@@ -211,7 +219,7 @@ workspace 根 lock 与 member 独立 clone lock 是两个合同。
 4. 只在内容变化时原子替换 member `uv.lock`；
 5. 遇到 path/workspace sources 或 nested workspace 时拒绝猜测。
 
-## 8. add/remove 事务边界
+## 9. add/remove 事务边界
 
 Aurauv在 `uv add/remove --no-sync` 前以内存 checkpoint 记录 owner、invocation root、
 workspace members 的 `pyproject.toml`/`uv.lock` 以及目标 state。后续 member lock、
@@ -227,9 +235,9 @@ root sync、provider/project verification 或 state 写入失败时：
 事务不复制 `.venv`，不创建持久 backup，也不替代 uv lock。命令执行期间并发手工
 修改同一 metadata 文件不属于支持的事务模型。
 
-## 9. 扩展原则
+## 10. 扩展原则
 
-新增 Triton 或 GUI/headless provider 时，优先新增 route/provider，不修改：
+新增 Triton、ROCm 或 XPU provider 时，优先新增 route/provider，不修改：
 
 - topology；
 - state；

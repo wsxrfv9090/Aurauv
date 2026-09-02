@@ -129,3 +129,20 @@ CUDA runtime 不可用 → CPU fallback 通常安全
 - provider-specific machine fingerprint 导致 state 失效；
 - 代码中不存在项目唯一版本点的复制常量；
 - 一个真实 uv metadata/lock 集成测试。
+
+## 10. 内置互斥 distribution provider
+
+共享 import name 的 wheel 不必再为每个项目重写 provider。使用内置
+`exclusive-distribution` 并配置：
+
+```text
+family                 完整互斥包族
+selections             route option 到唯一 distribution 的映射
+module                 共享 import name
+required-attributes    option 对应的最小运行时能力
+```
+
+该 provider 可以从一个干净、唯一且能力完整的已安装成员推断 option；存在多个
+family 成员、未知 family 成员、import 失败或能力缺失时均 fail closed。能力/导入
+失败只允许对已选 distribution 做一次 focused reinstall，不会据此授权 fallback；
+包族不唯一则不自动修复，因为它通常意味着项目 metadata 或 lock 合同错误。

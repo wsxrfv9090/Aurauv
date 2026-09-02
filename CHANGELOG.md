@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.0 — 2026-09-02
+
+- 新增 `exclusive-distribution` provider，管理共享同一 import name 的互斥发行包族。
+- 验证 route option 对应的实际 distribution、包族唯一性、共享 module import 与可选能力属性。
+- 新增真实离线 uv route 切换、current-interpreter bootstrap、状态失效和 fail-closed 回归测试。
+
 ## 0.1.2 — 2026-08-24
 
 - 修复 Windows BAT 启动器把 Python 版本比较中的 `^` 传入解释器而误报缺少 Python。

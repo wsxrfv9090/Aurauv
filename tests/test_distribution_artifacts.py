@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-EXPECTED_VERSION = "aurauv 0.1.2"
+EXPECTED_VERSION = "aurauv 0.2.0"
 TEMPLATE_KINDS = ("standalone", "workspace-member", "workspace-root")
 TRACKED_ARCHIVES = (
     REPO_ROOT / "bootstrap" / "aurauv.pyz",

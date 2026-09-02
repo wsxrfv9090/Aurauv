@@ -1,0 +1,34 @@
+# Merge this snippet into an environment owner's existing pyproject.toml.
+[project.optional-dependencies]
+vision-gui = ["opencv-contrib-python==5.0.0.93"]
+vision-headless = ["opencv-contrib-python-headless==5.0.0.93"]
+
+[tool.uv]
+conflicts = [[
+  { extra = "vision-gui" },
+  { extra = "vision-headless" },
+]]
+
+[tool.aurauv.routes.vision-runtime]
+default = "headless"
+providers = ["opencv"]
+
+[tool.aurauv.routes.vision-runtime.options.gui]
+extras = ["vision-gui"]
+
+[tool.aurauv.routes.vision-runtime.options.headless]
+extras = ["vision-headless"]
+
+[tool.aurauv.providers.opencv]
+type = "exclusive-distribution"
+project = "."
+route = "vision-runtime"
+family = [
+  "opencv-python",
+  "opencv-python-headless",
+  "opencv-contrib-python",
+  "opencv-contrib-python-headless",
+]
+selections = { gui = "opencv-contrib-python", headless = "opencv-contrib-python-headless" }
+module = "cv2"
+required-attributes = { gui = ["optflow"], headless = ["optflow"] }

@@ -12,7 +12,7 @@ Aurauv 是面向 ML 项目的 `uv` 包装层。它保留 `uv` 负责的依赖解
 - 安装后的 PyTorch wheel、CUDA runtime 和 MPS runtime 是否真的可用；
 - 路由选择如何针对“项目 + 实际环境 + 当前机器”持久化。
 
-当前内置 provider（提供者）只有 **PyTorch**。核心已经按通用 `route → option → provider` 模型设计，未来可以新增 Triton、ROCm、XPU、GUI/headless 互斥包族等，而不需要重写 workspace、状态、确认和 uv 转发逻辑。
+当前内置 provider（提供者）包括 **PyTorch**、可选 PyTorch companion，以及共享 import name 的 **exclusive distribution family**。核心按通用 `route → option → provider` 模型设计，未来仍可新增 Triton、ROCm、XPU 等包族，而不需要重写 workspace、状态、确认和 uv 转发逻辑。
 
 ---
 
@@ -309,15 +309,19 @@ provider（包族适配器）
   └── 返回状态指纹
 ```
 
-本版只有：
+本版内置：
 
 ```text
 route: accelerator
 options: cpu / mps / cuda
-provider: pytorch
+providers: pytorch / pytorch-companion
+
+route: 由项目命名，例如 vision-runtime
+options: 由项目命名，例如 gui / headless
+provider: exclusive-distribution
 ```
 
-未来可以独立加入：
+项目可以独立组合：
 
 ```text
 route: triton
@@ -329,7 +333,7 @@ options: gui / headless
 
 不同 route 正交；同一 route 内 option 互斥。这样不会把 accelerator、Triton、GUI/headless 全部揉成一个不断膨胀的巨型 profile。
 
-你提到的 ComfyUI 场景很可能属于“同一 import name、不同且互斥 distribution”的 GUI/headless 包族；Aurauv当前没有猜测或实现它，但 provider 边界已经能承载：包冲突校验、平台检测、选项映射和 import/runtime 验证。
+ComfyUI 常见的 OpenCV GUI/headless 冲突属于“同一 import name、不同且互斥 distribution”的包族。`exclusive-distribution` 不猜测项目应该选哪一个；项目通过 route default 或显式 `--aura-route` 决定，provider 在同步后验证实际 distribution、共享 import 与所需能力。
 
 ---
 
@@ -427,6 +431,21 @@ PyTorch 自动检测：
 - 项目配置的额外 imports 必须成功。
 
 如果 uv 元数据显示同步，但 PyTorch 文件损坏，Aurauv允许一次受控的 provider package 定向重装；不会绕开 uv lock。
+
+### 5.5 互斥 distribution provider
+
+`exclusive-distribution` 用于多个 wheel 覆盖同一个 import module 的场景，例如
+`opencv-python`、`opencv-python-headless`、`opencv-contrib-python` 和
+`opencv-contrib-python-headless` 都暴露 `cv2`。项目必须：
+
+- 在 route extras 中直接选择每个 option 对应的唯一 distribution；
+- 用 `tool.uv.conflicts` 声明这些 extras 互斥；
+- 把所有可能覆盖该 module 的 distribution 列入 `family`；
+- 需要时声明最小能力属性，例如 `optflow`。
+
+同步后 provider 会读取目标解释器的 distribution metadata，要求包族中恰好只有
+所选成员，再验证 module 与属性。它不会改写第三方包的错误或不适合本项目的依赖
+声明；这类修正仍应由根 `tool.uv.override-dependencies` 明确表达并进入 `uv.lock`。
 
 ---
 
@@ -554,7 +573,7 @@ provider repair/resync 或 state 写入。`--check` / `--dry-run` 同样遵守�
 
 受管 route 使用 mutually exclusive extras（互斥 extras）时，Aurauv拒绝 `--all-extras`，因为它会破坏“每个 route 恰好一个 option”的合同。
 
-### 0.1.2 已知 uv 参数漂移（本版本仅声明）
+### 0.2.0 已知 uv 参数漂移（本版本仅声明）
 
 Aurauv为 `add/remove/run` 重建 routed sync 时维护显式参数表。当前已知以下 uv
 0.12.5 语义尚未完整建模，本版本不修改它们：
@@ -694,7 +713,7 @@ examples/
 
 ## 12. 未来新增 provider 的边界
 
-新增 Triton 或 GUI/headless 包族时，不应改动 `engine.py` 的 workspace 和状态机。应新增 provider，实现：
+新增 Triton、ROCm 或 XPU 包族时，不应改动 `engine.py` 的 workspace 和状态机。应新增 provider，实现：
 
 ```python
 class NewProvider(Provider):
@@ -718,7 +737,7 @@ preflight = OS、Python、Torch backend、编译前提
 verify = import triton + 最小 runtime probe
 ```
 
-GUI/headless provider 可以验证：
+现有 `exclusive-distribution` provider 已验证：
 
 ```text
 两个 distribution 不得同时出现

@@ -62,7 +62,7 @@ fallback来源只能是：
 ### 2.5 路由参数与 uv 参数分离
 
 Aurauv只解析放在 uv 子命令之前的 `--aura-*`。一旦识别 uv 子命令，后续参数保留给
-uv 或子程序；0.1.2 已知的 child/uv 参数表漂移单独记录在 README，本次安全修复
+uv 或子程序；0.2.0 已知的 child/uv 参数表漂移单独记录在 README，本次功能新增
 不改变这些转发语义。
 
 ## 3. 分层
@@ -80,6 +80,7 @@ cli.py
           ├── transaction.py add/remove metadata checkpoint
           └── providers/
               ├── base.py
+              ├── exclusive_distribution.py
               ├── pytorch.py
               └── pytorch_companion.py
 ```
@@ -115,6 +116,9 @@ current-interpreter 安装参数
 核心不知道 `torch`、`cu132`、`nvidia-smi` 或 MPS；这些只存在于 PyTorch provider。
 `pytorch-companion` 可在同 route 的基础 provider 后验证实际安装的 `torchaudio`、
 `torchcodec`，缺席时 no-op，出现时把 distribution/module/backend 证据写入 state。
+`exclusive-distribution` 由项目配置一个完整互斥 family、option → distribution 映射、
+共享 module 和可选能力属性；同步后必须只发现所选 distribution，且 module probe
+通过。它不改写依赖元数据，也不把冲突静默修成另一个 option。
 
 ## 5. 成员 lock 协议
 

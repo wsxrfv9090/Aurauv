@@ -138,7 +138,53 @@ companion provider 不新增依赖、不选择 route，也不自行解释 `uv.lo
 成功 state 的 `provider_results.pytorch-companions` 会明确包含 configured、active、
 inactive packages、module backend 和 expected backend。
 
-## 6. Member 合同
+## 6. Exclusive distribution provider
+
+```toml
+[tool.aurauv.routes.vision-runtime]
+default = "headless"
+providers = ["opencv"]
+
+[tool.aurauv.routes.vision-runtime.options.gui]
+extras = ["vision-gui"]
+
+[tool.aurauv.routes.vision-runtime.options.headless]
+extras = ["vision-headless"]
+
+[tool.aurauv.providers.opencv]
+type = "exclusive-distribution"
+project = "."
+route = "vision-runtime"
+family = [
+  "opencv-python",
+  "opencv-python-headless",
+  "opencv-contrib-python",
+  "opencv-contrib-python-headless",
+]
+selections = { gui = "opencv-contrib-python", headless = "opencv-contrib-python-headless" }
+module = "cv2"
+required-attributes = { gui = ["optflow"], headless = ["optflow"] }
+```
+
+| 键 | 含义 |
+|---|---|
+| `type` | 固定为 `exclusive-distribution` |
+| `project` | 当前必须是 environment owner（`.`） |
+| `route` | provider 绑定的互斥 route |
+| `family` | 所有可能覆盖共享 module 的 distribution，至少两个 |
+| `selections` | 每个 route option 恰好选择一个不同的 family 成员 |
+| `module` | family 共享的 import module |
+| `required-attributes` | 每个 option 同步后必须存在的可选点号属性路径 |
+
+每个 option 的 root extras 必须直接依赖其所选 distribution，且同 route 的 extras
+必须处于同一个 `tool.uv.conflicts` 集合。provider 读取实际环境 metadata 并要求
+family 中恰好只有所选成员；只验证 import 而不验证 distribution 不够。
+
+若第三方包的依赖元数据会额外拉入 family 的其他成员，应在 environment owner 的
+`tool.uv.override-dependencies` 中做可审计的 scoped override。Aurauv不会自动改写
+依赖或在 lock 外执行修补安装。
+
+## 7. Member 合同
 
 ```toml
 [tool.aurauv.members.model_core]
@@ -157,7 +203,7 @@ metadata-files = ["pyproject.toml", "uv.lock", "README.md"]
 
 `metadata` 不是任意项目复制器。遇到 path/workspace source 或 nested workspace 会停止。
 
-## 7. CLI override
+## 8. CLI override
 
 ```bash
 aurauv --aura-route accelerator=cuda sync

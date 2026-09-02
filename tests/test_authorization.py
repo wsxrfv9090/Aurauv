@@ -137,5 +137,5 @@ def test_explicit_python_install_uses_uv_then_rechecks(tmp_path: Path) -> None:
         target="project",
     )
     assert runner.installed
-    assert selected.executable == Path(sys.executable).absolute()
+    assert selected.executable == Path(sys.executable).resolve()
     assert selected.origin == "uv-installed Python 3.13"

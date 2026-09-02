@@ -6,11 +6,13 @@ from ..errors import AurauvError
 from ..models import AurauvConfig, ProviderSpec
 from ..process import CommandRunner
 from .base import Provider
+from .exclusive_distribution import ExclusiveDistributionProvider
 from .pytorch import PytorchProvider
 from .pytorch_companion import PytorchCompanionProvider
 
 
 _PROVIDER_TYPES = {
+    "exclusive-distribution": ExclusiveDistributionProvider,
     "pytorch": PytorchProvider,
     "pytorch-companion": PytorchCompanionProvider,
 }
