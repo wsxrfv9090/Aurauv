@@ -71,3 +71,22 @@ def test_child_project_and_aura_flags_after_run_are_not_wrapper_options() -> Non
         "child",
         "--aura-no-route",
     )
+
+
+@pytest.mark.parametrize('command', ['workspace', 'future-command'])
+def test_unknown_command_preserves_its_entire_argument_stream(command: str) -> None:
+    args = [command, 'run', '--aura-no-route', 'aura', 'version']
+    parsed = parse_invocation(args)
+    assert parsed.command == command
+    assert parsed.command_index == 0
+    assert parsed.uv_args == tuple(args)
+    assert parsed.special_command is None
+    assert parsed.aura.no_route is False
+
+
+def test_global_separator_is_forwarded_without_consuming_aura_options() -> None:
+    args = ['--', 'sync', '--aura-no-route']
+    parsed = parse_invocation(args)
+    assert parsed.uv_args == tuple(args)
+    assert parsed.command is None
+    assert parsed.aura.no_route is False

@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- 支持当前 uv 的 `run --no-editable-package`、`--upgrade-group`、`--prerelease-package` 和 `--system-certs`，预同步保留这些选项。
+- `workspace` 和未来 uv 子命令的参数原样转发，不再误吞子命令后的 `--aura-*`。
+- 修复 `run -m` / `-s` 选项边界，子程序参数不再影响路由、repair 或 fallback 同步。
+- 在 uv 0.12.21 上验证；不提高 minimum-uv，也不自动升级用户的 uv。
+
 ## 0.2.0 — 2026-09-02
 
 - 新增 `exclusive-distribution` provider，管理共享同一 import name 的互斥发行包族。

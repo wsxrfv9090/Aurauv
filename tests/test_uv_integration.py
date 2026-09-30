@@ -632,6 +632,7 @@ extras = ["b"]
         "import run_route_a, run_extraneous, sys; print(sys.argv[1:])",
         "--extra",
         "b",
+        "--isolated",
     )
     assert result.returncode == 0, result.stderr + result.stdout
     assert "--extra" in result.stdout and "b" in result.stdout
@@ -688,6 +689,13 @@ extras = ["local"]
         "run",
         "--group",
         "experiment",
+        "--no-editable-package",
+        "group-demo",
+        "--upgrade-group",
+        "experiment",
+        "--prerelease-package",
+        "group-only=allow",
+        "--system-certs",
         "python",
         "-c",
         "import group_route, group_only; print('group-ok')",

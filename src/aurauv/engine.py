@@ -17,7 +17,6 @@ from .errors import (
     CommandError,
     ProviderVerificationError,
 )
-from .invocation import UV_COMMANDS
 from .member_lock import reconcile_member_lock
 from .models import (
     AuraOptions,
@@ -64,7 +63,7 @@ _MANAGED_COMMANDS = {"sync", "run", "add", "remove", "lock", "export", "tree"}
 _ROUTED_COMMANDS = {"sync", "run", "export"}
 _AURA_READ_ONLY_FLAGS = {"--check", "--dry-run", "--locked", "--frozen"}
 _MEMBER_CHECK_ONLY_FLAGS = {"--check", "--dry-run", "--locked", "--frozen"}
-_RUN_EPHEMERAL_FLAGS = {"--no-project", "--isolated", "--script", "--gui-script"}
+_RUN_EPHEMERAL_FLAGS = {"--no-project", "--isolated", "--script", "-s", "--gui-script"}
 
 # Options that belong to `uv run` before the child command.  We only need this
 # parser to separate uv's option stream from arguments passed to the program.
@@ -78,6 +77,7 @@ _RUN_VALUE_OPTIONS = {
     "--keyring-provider", "--upgrade-package", "--resolution", "--prerelease",
     "--fork-strategy", "--exclude-newer", "--exclude-newer-package",
     "--no-sources-package", "--reinstall-package", "--link-mode",
+    "--no-editable-package", "--upgrade-group", "--prerelease-package",
     "--config-setting", "--config-settings-package",
     "--no-build-isolation-package", "--no-build-package",
     "--no-binary-package", "--cache-dir", "--refresh-package", "--python",
@@ -93,9 +93,9 @@ _RUN_FLAG_OPTIONS = {
     "--no-build-isolation", "--no-build", "--no-binary", "--no-cache",
     "--refresh", "--managed-python", "--no-managed-python",
     "--no-python-downloads", "--quiet", "--verbose", "--native-tls",
-    "--offline", "--no-progress", "--no-config", "-q", "-v", "-U", "-n",
+    "--offline", "--no-progress", "--no-config", "--system-certs", "-q", "-v", "-U", "-n",
 }
-_RUN_COMMAND_VALUE_OPTIONS = {"--module", "-m", "--script", "-s", "--gui-script"}
+_RUN_MODE_FLAGS = {"--module", "-m", "--script", "-s", "--gui-script"}
 
 _SYNC_COPY_VALUE_OPTIONS = (
     "--extra", "--no-extra", "--group", "--no-group", "--only-group",
@@ -104,6 +104,7 @@ _SYNC_COPY_VALUE_OPTIONS = (
     "--keyring-provider", "--upgrade-package", "--resolution", "--prerelease",
     "--fork-strategy", "--exclude-newer", "--exclude-newer-package",
     "--no-sources-package", "--reinstall-package", "--link-mode",
+    "--no-editable-package", "--upgrade-group", "--prerelease-package",
     "--config-setting", "--config-settings-package",
     "--no-build-isolation-package", "--no-build-package",
     "--no-binary-package", "--cache-dir", "--refresh-package", "--python",
@@ -116,7 +117,7 @@ _SYNC_COPY_FLAGS = (
     "--compile-bytecode", "--no-build-isolation", "--no-build",
     "--no-binary", "--no-cache", "--refresh", "--managed-python",
     "--no-managed-python", "--no-python-downloads", "--native-tls",
-    "--offline", "--no-progress", "--no-config",
+    "--offline", "--no-progress", "--no-config", "--system-certs",
 )
 
 
@@ -422,11 +423,10 @@ class AurauvEngine:
             if token == "--":
                 break
             name = token.split("=", 1)[0]
-            if name in _RUN_COMMAND_VALUE_OPTIONS:
-                # Module/script selection consumes a value but is not a sync option.
-                if "=" not in token:
-                    index += 1
-                break
+            if name in _RUN_MODE_FLAGS:
+                result.append(token)
+                index += 1
+                continue
             if name in _RUN_VALUE_OPTIONS:
                 result.append(token)
                 if "=" not in token and index + 1 < len(args):
@@ -450,7 +450,10 @@ class AurauvEngine:
         inexact: bool = False,
         source_args: Sequence[str] | None = None,
     ) -> list[str]:
-        source = tuple(self.parsed.uv_args if source_args is None else source_args)
+        source = tuple(
+            (self._run_option_view() if self.parsed.command == "run" else self.parsed.uv_args)
+            if source_args is None else source_args
+        )
         globals_before = (
             list(source[: self.parsed.command_index])
             if self.parsed.command_index is not None
@@ -691,8 +694,11 @@ class AurauvEngine:
             return self.passthrough()
         if command not in _MANAGED_COMMANDS:
             return self.passthrough()
+        option_view = (
+            self._run_option_view() if command == "run" else self.parsed.uv_args
+        )
         if command == "run" and any(
-            contains_option(self.parsed.uv_args, flag) for flag in _RUN_EPHEMERAL_FLAGS
+            contains_option(option_view, flag) for flag in _RUN_EPHEMERAL_FLAGS
         ):
             info("Ephemeral/no-project uv run detected; passing through without project routing.")
             return self.passthrough()

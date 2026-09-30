@@ -10,6 +10,7 @@ from .models import AuraOptions, ParsedInvocation
 
 UV_COMMANDS = {
     "auth",
+    "workspace",
     "run",
     "init",
     "add",
@@ -96,6 +97,12 @@ def parse_invocation(argv: Sequence[str]) -> ParsedInvocation:
             uv_args.extend(raw[index:])
             break
 
+        if token == "--":
+            # Do not reinterpret uv's separator or anything after it. Let uv
+            # validate a separator before the command without project effects.
+            uv_args.extend(raw[index:])
+            break
+
         name, equals, inline_value = token.partition("=")
         if name in _VALUE_OPTIONS:
             if equals:
@@ -167,7 +174,9 @@ def parse_invocation(argv: Sequence[str]) -> ParsedInvocation:
             continue
 
         uv_args.append(token)
-        if token in UV_COMMANDS:
+        # The first positional token is the command boundary, even for future
+        # uv commands. Never consume Aura flags from their argument stream.
+        if not token.startswith("-"):
             command = token
             command_index = len(uv_args) - 1
         index += 1

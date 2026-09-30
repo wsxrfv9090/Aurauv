@@ -365,3 +365,63 @@ def test_no_sync_nonzero_attempts_transaction_rollback_only_once(
         engine._execute_mutation("add")
 
     assert attempts == 1
+
+
+@pytest.mark.parametrize('flag', ['--isolated', '--no-project', '--script', '--gui-script', '--help'])
+def test_child_flags_do_not_bypass_project_routing(flag, tmp_path, uv_path, monkeypatch):
+    engine = _engine(['run', 'python', 'app.py', flag], tmp_path=tmp_path, uv_path=uv_path, monkeypatch=monkeypatch)
+    monkeypatch.setattr(engine, 'passthrough', lambda: pytest.fail('child flag bypassed routing'))
+    monkeypatch.setattr(engine, '_prepare_project', lambda **kwargs: None)
+    monkeypatch.setattr(engine, '_execute_run', lambda: 42)
+    assert engine.execute() == 42
+
+
+@pytest.mark.parametrize('flag', ['--isolated', '--no-project', '--script', '-s', '--gui-script'])
+def test_uv_ephemeral_flags_still_bypass_routing(flag, tmp_path, uv_path, monkeypatch):
+    engine = _engine(['run', flag, 'app.py'], tmp_path=tmp_path, uv_path=uv_path, monkeypatch=monkeypatch)
+    monkeypatch.setattr(engine, 'passthrough', lambda: 42)
+    assert engine.execute() == 42
+
+
+def test_current_uv_options_reach_presync_without_losing_following_group(tmp_path, uv_path, monkeypatch):
+    engine = _engine(['run', '--no-editable-package', 'demo', '--group', 'test', '--system-certs', 'python', '--group', 'child'], tmp_path=tmp_path, uv_path=uv_path, monkeypatch=monkeypatch)
+    _, engine.config = _mutation_project(tmp_path)
+    engine.config.routes.clear()
+    view = engine._run_option_view()
+    assert view == ('run', '--no-editable-package', 'demo', '--group', 'test', '--system-certs')
+    sync = engine._fresh_sync_args({}, source_args=view)
+    assert '--system-certs' in sync
+    assert sync[sync.index('--no-editable-package') + 1] == 'demo'
+    assert sync[sync.index('--group') + 1] == 'test'
+    assert 'child' not in sync
+
+
+@pytest.mark.parametrize('option', ['--upgrade-group', '--prerelease-package'])
+def test_new_uv_value_options_preserve_following_flags(option, tmp_path, uv_path, monkeypatch):
+    engine = _engine(['run', option, 'demo', '--offline', 'python'], tmp_path=tmp_path, uv_path=uv_path, monkeypatch=monkeypatch)
+    _, engine.config = _mutation_project(tmp_path)
+    engine.config.routes.clear()
+    view = engine._run_option_view()
+    assert view == ('run', option, 'demo', '--offline')
+    sync = engine._fresh_sync_args({}, source_args=view)
+    assert sync[sync.index(option) + 1] == 'demo'
+    assert '--offline' in sync
+
+
+def test_module_flag_allows_following_uv_options(tmp_path, uv_path, monkeypatch):
+    engine = _engine(['run', '-m', '--offline', 'demo', '--isolated'], tmp_path=tmp_path, uv_path=uv_path, monkeypatch=monkeypatch)
+    assert engine._run_option_view() == ('run', '-m', '--offline')
+
+
+def test_repair_sync_ignores_child_flags_by_default(tmp_path, uv_path, monkeypatch):
+    engine = _engine(['run', 'python', 'app.py', '--offline', '--group', 'child'], tmp_path=tmp_path, uv_path=uv_path, monkeypatch=monkeypatch)
+    _, engine.config = _mutation_project(tmp_path)
+    engine.config.routes.clear()
+    sync = engine._fresh_sync_args({})
+    assert '--offline' not in sync
+    assert '--group' not in sync
+
+
+def test_explicit_run_separator_keeps_child_options_out_of_sync(tmp_path, uv_path, monkeypatch):
+    engine = _engine(['run', '--offline', '--', 'python', '--isolated', '--group', 'child'], tmp_path=tmp_path, uv_path=uv_path, monkeypatch=monkeypatch)
+    assert engine._run_option_view() == ('run', '--offline')
