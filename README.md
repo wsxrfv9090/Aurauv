@@ -560,8 +560,10 @@ uv run --no-sync ...
 
 执行子命令，避免 uv 在第二阶段再次用未路由的默认条件同步。
 
-Aurauv以首个子程序 positional argument 作为参数边界。0.1.2 的已知 uv 参数
-漂移见下文；在这些边界内不要假定所有未来 uv 选项都已被 wrapper 理解。
+Aurauv以首个子程序 positional argument（含 stdin 的 `-`）或 `--` 作为参数边界。
+当前已按 uv 0.12.21 验证长短参数、短参数组合和 module/script 模式；子程序的
+`--isolated`、`--group`、`--help` 等参数不会参与项目路由或预同步。
+uv 自身的 help/version 请求直接转发，不触发项目准备或同步。
 
 ### `--dry-run` / `--check` / `--locked` / `--frozen` / `--offline`
 
@@ -573,18 +575,16 @@ provider repair/resync 或 state 写入。`--check` / `--dry-run` 同样遵守�
 
 受管 route 使用 mutually exclusive extras（互斥 extras）时，Aurauv拒绝 `--all-extras`，因为它会破坏“每个 route 恰好一个 option”的合同。
 
-### 0.2.0 已知 uv 参数漂移（本版本仅声明）
+### 已知 uv 参数边界
 
-Aurauv为 `add/remove/run` 重建 routed sync 时维护显式参数表。当前已知以下 uv
-0.12.5 语义尚未完整建模，本版本不修改它们：
+Aurauv为 `add/remove/run` 重建 routed sync 时维护显式参数表；未来新增的有值参数
+仍可能需要更新此表。以下语义尚未完整建模：
 
-- `uv run` 子程序参数若恰好包含 `--isolated`、`--no-project`、`--script` 或
-  `--gui-script`，可能被提前识别为 uv run 选项；
 - `uv add --optional NAME PACKAGE` 会把依赖写入 optional extra，但 follow-up
   routed sync 尚不会自动转换为 `sync --extra NAME`；
-- follow-up sync 尚未复制 `--no-editable-package`、`--no-install-project`、
-  `--no-install-workspace`、`--no-install-local`、`--no-install-package`、
-  `--upgrade-group`、`--prerelease-package`、`--system-certs` 和项目型 `--script`。
+- follow-up sync 尚未复制 `--no-install-project`、
+  `--no-install-workspace`、`--no-install-local`、`--no-install-package`
+  和项目型 `--script`。
 
 需要这些参数的精确原生语义时，应使用 `--aura-no-route` 明确直通 uv，并由调用者
 另行执行 reviewed routed sync；不要把直通视为已经保留了 Aurauv route。

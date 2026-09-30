@@ -28,9 +28,14 @@ def environment_identity(
     uv_args: Sequence[str],
     current_prefix: Path,
 ) -> EnvironmentIdentity:
+    use_active = next(
+        (arg == "--active" for arg in reversed(uv_args)
+         if arg in {"--active", "--no-active"}),
+        False,
+    )
     if target == "current":
         environment_path = current_prefix.resolve()
-    elif "--active" in uv_args and os.environ.get("VIRTUAL_ENV"):
+    elif use_active and os.environ.get("VIRTUAL_ENV"):
         environment_path = Path(os.environ["VIRTUAL_ENV"]).expanduser().resolve()
     elif os.environ.get("UV_PROJECT_ENVIRONMENT"):
         raw = Path(os.environ["UV_PROJECT_ENVIRONMENT"]).expanduser()

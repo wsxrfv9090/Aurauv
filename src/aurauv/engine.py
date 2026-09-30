@@ -82,6 +82,8 @@ _RUN_VALUE_OPTIONS = {
     "--no-build-isolation-package", "--no-build-package",
     "--no-binary-package", "--cache-dir", "--refresh-package", "--python",
     "--color", "--allow-insecure-host", "--directory", "--project",
+    "--python-preference", "--python-fetch", "--preview-features",
+    "--max-recursion-depth",
     "--config-file", "-w", "-P", "-C", "-f", "-i", "-p",
 }
 _RUN_FLAG_OPTIONS = {
@@ -97,6 +99,48 @@ _RUN_FLAG_OPTIONS = {
 }
 _RUN_MODE_FLAGS = {"--module", "-m", "--script", "-s", "--gui-script"}
 
+_UV_SHORT_FLAGS = {
+    "m": "--module", "s": "--script", "q": "--quiet", "v": "--verbose",
+    "U": "--upgrade", "n": "--no-cache", "h": "--help", "V": "--version",
+}
+_UV_SHORT_VALUES = {
+    "w": "--with", "P": "--upgrade-package", "C": "--config-setting",
+    "f": "--find-links", "i": "--index-url", "p": "--python",
+}
+_UV_OPTION_ALIASES = {
+    "--trusted-host": "--allow-insecure-host",
+    "--preview-feature": "--preview-features",
+    "--config-settings": "--config-setting",
+    "--no_workspace": "--no-project",
+    "--no-exact": "--inexact",
+    "--force-reinstall": "--reinstall",
+    "--compile": "--compile-bytecode",
+    "--no-compile": "--no-compile-bytecode",
+}
+
+
+def _uv_option_tokens(token: str) -> tuple[str, ...]:
+    """Normalize known aliases for inspection without changing uv's original argv."""
+
+    name, equals, value = token.partition("=")
+    if name in _UV_OPTION_ALIASES:
+        return (_UV_OPTION_ALIASES[name] + (f"={value}" if equals else ""),)
+    if not token.startswith("-") or token.startswith("--") or token == "-":
+        return (token,)
+    result: list[str] = []
+    for index, short in enumerate(token[1:], start=1):
+        if short in _UV_SHORT_VALUES:
+            attached = token[index + 1 :]
+            name = _UV_SHORT_VALUES[short]
+            result.append(name + (f"={attached.removeprefix('=')}" if attached else ""))
+            return tuple(result)
+        if short not in _UV_SHORT_FLAGS:
+            # Do not guess the meaning of an unknown short option or its value.
+            return (token,)
+        result.append(_UV_SHORT_FLAGS[short])
+    return tuple(result)
+
+
 _SYNC_COPY_VALUE_OPTIONS = (
     "--extra", "--no-extra", "--group", "--no-group", "--only-group",
     "--package", "--python-platform", "--index", "--default-index",
@@ -108,7 +152,8 @@ _SYNC_COPY_VALUE_OPTIONS = (
     "--config-setting", "--config-settings-package",
     "--no-build-isolation-package", "--no-build-package",
     "--no-binary-package", "--cache-dir", "--refresh-package", "--python",
-    "--color", "--allow-insecure-host", "--config-file",
+    "--color", "--allow-insecure-host", "--config-file", "--directory",
+    "--python-preference", "--python-fetch", "--preview-features",
 )
 _SYNC_COPY_FLAGS = (
     "--no-dev", "--no-default-groups", "--all-groups", "--only-dev",
@@ -118,6 +163,12 @@ _SYNC_COPY_FLAGS = (
     "--no-binary", "--no-cache", "--refresh", "--managed-python",
     "--no-managed-python", "--no-python-downloads", "--native-tls",
     "--offline", "--no-progress", "--no-config", "--system-certs",
+    "--no-system-certs", "--no-native-tls", "--no-offline",
+    "--preview", "--no-preview", "--no-color", "--no-installer-metadata",
+    "--allow-python-downloads", "--quiet", "--verbose",
+    "--dev", "--editable", "--no-active", "--no-locked", "--no-frozen",
+    "--no-upgrade", "--no-reinstall", "--no-compile-bytecode",
+    "--build-isolation", "--no-refresh", "--exact", "--inexact",
 )
 
 
@@ -415,12 +466,17 @@ class AurauvEngine:
 
         if self.parsed.command != "run" or self.parsed.command_index is None:
             return self.parsed.uv_args
-        args = self.parsed.uv_args
+        original = self.parsed.uv_args
+        args = (
+            *original[: self.parsed.command_index + 1],
+            *(part for token in original[self.parsed.command_index + 1 :]
+              for part in _uv_option_tokens(token)),
+        )
         result = list(args[: self.parsed.command_index + 1])
         index = self.parsed.command_index + 1
         while index < len(args):
             token = args[index]
-            if token == "--":
+            if token in {"--", "-"}:
                 break
             name = token.split("=", 1)[0]
             if name in _RUN_MODE_FLAGS:
@@ -450,6 +506,8 @@ class AurauvEngine:
         inexact: bool = False,
         source_args: Sequence[str] | None = None,
     ) -> list[str]:
+        """Build a sync to run from the invocation cwd, preserving relative paths."""
+
         source = tuple(
             (self._run_option_view() if self.parsed.command == "run" else self.parsed.uv_args)
             if source_args is None else source_args
@@ -462,19 +520,32 @@ class AurauvEngine:
         args = [*globals_before, "sync"]
         if option_value(globals_before, "--project") is None:
             args.extend(("--project", str(self.cfg.owner_root)))
-        existing_extras: set[str] = set()
-        for name in _SYNC_COPY_VALUE_OPTIONS:
-            for value in option_values(source, name):
-                if name == "--extra":
-                    existing_extras.add(value)
-                args.extend((name, value))
-        for flag in _SYNC_COPY_FLAGS:
-            if contains_option(source, flag) and not contains_option(args, flag):
-                args.append(flag)
+        # Preserve option order: uv has last-one-wins flag pairs. Copy only the
+        # command's options, since its global prefix was already retained above.
+        command_args = (
+            source[self.parsed.command_index + 1 :]
+            if self.parsed.command_index is not None else source
+        )
+        options = tuple(part for token in command_args for part in _uv_option_tokens(token))
+        existing_extras = set(option_values(source, "--extra"))
+        index = 0
+        while index < len(options):
+            token = options[index]
+            if token == "--":
+                break
+            name, equals, _ = token.partition("=")
+            if name in _SYNC_COPY_VALUE_OPTIONS:
+                args.append(token)
+                if not equals and index + 1 < len(options):
+                    index += 1
+                    args.append(options[index])
+            elif name in _SYNC_COPY_FLAGS:
+                args.append(token)
+            index += 1
         for extra in selected_extras(self.cfg, selections):
             if extra not in existing_extras:
                 args.extend(("--extra", extra))
-        if inexact and not contains_option(source, "--exact"):
+        if inexact and not any(contains_option(options, flag) for flag in ("--exact", "--inexact")):
             args.append("--inexact")
         if no_sync:
             args.append("--check")
@@ -585,7 +656,7 @@ class AurauvEngine:
                             self._fresh_sync_args(
                                 selections, reinstall_packages=packages
                             ),
-                            cwd=self.cfg.owner_root,
+                            cwd=self.cwd,
                         )
                         repaired = True
                         verified = provider.verify(
@@ -655,7 +726,7 @@ class AurauvEngine:
                 fallback_reason=str(failure),
                 details={**original.details, "runtime_fallback_preflight": preflight},
             )
-            self._run_uv(self._fresh_sync_args(updated), cwd=self.cfg.owner_root)
+            self._run_uv(self._fresh_sync_args(updated), cwd=self.cwd)
             return updated, self._verify_providers(updated, allow_repair=allow_repair)
 
     def _write_state(
@@ -697,6 +768,14 @@ class AurauvEngine:
         option_view = (
             self._run_option_view() if command == "run" else self.parsed.uv_args
         )
+        global_args = self.parsed.uv_args[: self.parsed.command_index]
+        if any("--version" in _uv_option_tokens(token) for token in global_args):
+            return self.passthrough()
+        for token in option_view:
+            if token == "--":
+                break
+            if "--help" in _uv_option_tokens(token):
+                return self.passthrough()
         if command == "run" and any(
             contains_option(option_view, flag) for flag in _RUN_EPHEMERAL_FLAGS
         ):
@@ -755,7 +834,7 @@ class AurauvEngine:
                 self._fresh_sync_args(
                     selections, inexact=True, source_args=run_view
                 ),
-                cwd=self.cfg.owner_root,
+                cwd=self.cwd,
             )
         selections, provider_results = self._verify_with_runtime_fallback(
             selections,
@@ -908,7 +987,7 @@ class AurauvEngine:
             sync_selections = self._select()
             environment_may_have_changed = True
             self._run_uv(
-                self._fresh_sync_args(sync_selections), cwd=self.cfg.owner_root
+                self._fresh_sync_args(sync_selections), cwd=self.cwd
             )
             selections, results = self._verify_with_runtime_fallback(
                 sync_selections,
@@ -1023,7 +1102,7 @@ class AurauvEngine:
         selections = self._select()
         self._reconcile_members(all_members=True, check_only=True)
         sync_args = self._fresh_sync_args(selections, no_sync=True)
-        self._run_uv(sync_args, cwd=self.cfg.owner_root)
+        self._run_uv(sync_args, cwd=self.cwd)
         results = self._verify_providers(selections, allow_repair=False)
         info("Doctor completed without modifying locks, environment, or Aurauv state.")
         if self.parsed.aura.json_output:
@@ -1073,7 +1152,7 @@ class AurauvEngine:
         self._run_uv(lock_args, cwd=self.cfg.owner_root)
 
         selections = self._select()
-        self._run_uv(self._fresh_sync_args(selections), cwd=self.cfg.owner_root)
+        self._run_uv(self._fresh_sync_args(selections), cwd=self.cwd)
         selections, results = self._verify_with_runtime_fallback(
             selections, allow_repair=True, allow_resync=True
         )

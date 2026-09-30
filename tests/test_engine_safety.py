@@ -410,7 +410,7 @@ def test_new_uv_value_options_preserve_following_flags(option, tmp_path, uv_path
 
 def test_module_flag_allows_following_uv_options(tmp_path, uv_path, monkeypatch):
     engine = _engine(['run', '-m', '--offline', 'demo', '--isolated'], tmp_path=tmp_path, uv_path=uv_path, monkeypatch=monkeypatch)
-    assert engine._run_option_view() == ('run', '-m', '--offline')
+    assert engine._run_option_view() == ('run', '--module', '--offline')
 
 
 def test_repair_sync_ignores_child_flags_by_default(tmp_path, uv_path, monkeypatch):
@@ -425,3 +425,72 @@ def test_repair_sync_ignores_child_flags_by_default(tmp_path, uv_path, monkeypat
 def test_explicit_run_separator_keeps_child_options_out_of_sync(tmp_path, uv_path, monkeypatch):
     engine = _engine(['run', '--offline', '--', 'python', '--isolated', '--group', 'child'], tmp_path=tmp_path, uv_path=uv_path, monkeypatch=monkeypatch)
     assert engine._run_option_view() == ('run', '--offline')
+
+
+@pytest.mark.parametrize("short,expected", [
+    (["-p", "3.12"], ["--python", "3.12"]),
+    (["-p3.12"], ["--python=3.12"]),
+    (["-p=3.12"], ["--python=3.12"]),
+    (["-qP", "demo"], ["--quiet", "--upgrade-package", "demo"]),
+    (["-qPdemo"], ["--quiet", "--upgrade-package=demo"]),
+    (["-nf./wheels"], ["--no-cache", "--find-links=./wheels"]),
+    (["-i", "https://example.test/simple"], ["--index-url", "https://example.test/simple"]),
+    (["-Ckey=value"], ["--config-setting=key=value"]),
+    (["-U"], ["--upgrade"]),
+    (["--config-settings", "key=value"], ["--config-setting", "key=value"]),
+    (["--preview-feature", "all"], ["--preview-features", "all"]),
+])
+def test_run_aliases_and_attached_values_reach_presync(short, expected, tmp_path, uv_path, monkeypatch):
+    engine = _engine(["run", *short, "--offline", "python", "--group", "child"],
+                     tmp_path=tmp_path, uv_path=uv_path, monkeypatch=monkeypatch)
+    _, engine.config = _mutation_project(tmp_path)
+    engine.config.routes.clear()
+    assert engine._run_option_view() == ("run", *expected, "--offline")
+    sync = engine._fresh_sync_args({})
+    assert sync[3:] == [*expected, "--offline"]
+
+
+@pytest.mark.parametrize("args", [
+    ["run", "--help"], ["run", "-qh"], ["sync", "--help"],
+    ["--help", "sync"], ["--version", "sync"], ["-V", "sync"],
+    ["-vh", "sync"], ["run", "-qs", "app.py"],
+    ["run", "--no_workspace", "python"],
+])
+def test_native_early_exit_and_script_aliases_never_prepare_project(args, tmp_path, uv_path, monkeypatch):
+    engine = _engine(args, tmp_path=tmp_path, uv_path=uv_path, monkeypatch=monkeypatch)
+    monkeypatch.setattr(engine, "_prepare_project", lambda **kwargs: pytest.fail("prepared a project"))
+    monkeypatch.setattr(engine, "passthrough", lambda: 42)
+    assert engine.execute() == 42
+
+
+@pytest.mark.parametrize("child", ["--isolated", "--group", "--help", "-h"])
+def test_stdin_marker_ends_uv_run_options(child, tmp_path, uv_path, monkeypatch):
+    engine = _engine(["run", "--offline", "-", child],
+                     tmp_path=tmp_path, uv_path=uv_path, monkeypatch=monkeypatch)
+    assert engine._run_option_view() == ("run", "--offline")
+    monkeypatch.setattr(engine, "passthrough", lambda: pytest.fail("child flag bypassed routing"))
+    monkeypatch.setattr(engine, "_prepare_project", lambda **kwargs: None)
+    monkeypatch.setattr(engine, "_execute_run", lambda: 42)
+    assert engine.execute() == 42
+
+
+def test_presync_preserves_flag_override_order_and_does_not_duplicate_globals(tmp_path, uv_path, monkeypatch):
+    engine = _engine(["--cache-dir", "cache", "run", "--no-managed-python", "--managed-python",
+                      "--system-certs", "--no-system-certs", "--exact", "--inexact", "python"],
+                     tmp_path=tmp_path, uv_path=uv_path, monkeypatch=monkeypatch)
+    _, engine.config = _mutation_project(tmp_path)
+    engine.config.routes.clear()
+    sync = engine._fresh_sync_args({}, inexact=True)
+    assert sync == ["--cache-dir", "cache", "sync", "--project", str(engine.cfg.owner_root),
+                    "--no-managed-python", "--managed-python", "--system-certs", "--no-system-certs",
+                    "--exact", "--inexact"]
+
+
+def test_no_active_override_selects_project_environment(tmp_path, monkeypatch):
+    from aurauv.state import environment_identity
+
+    _, config = _mutation_project(tmp_path)
+    monkeypatch.setenv("VIRTUAL_ENV", str(tmp_path / "active"))
+    identity = environment_identity(config, target="project", uv_args=("--active", "--no-active"),
+                                    current_prefix=tmp_path)
+    assert identity.path == config.owner_root / ".venv"

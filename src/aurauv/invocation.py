@@ -43,11 +43,16 @@ _VALUE_OPTIONS = {
 
 _UV_GLOBAL_VALUE_OPTIONS = {
     "--allow-insecure-host",
+    "--trusted-host",
     "--cache-dir",
     "--color",
     "--config-file",
     "--directory",
     "--project",
+    "--python-preference",
+    "--python-fetch",
+    "--preview-features",
+    "--preview-feature",
 }
 
 

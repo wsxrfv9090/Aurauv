@@ -90,3 +90,19 @@ def test_global_separator_is_forwarded_without_consuming_aura_options() -> None:
     assert parsed.uv_args == tuple(args)
     assert parsed.command is None
     assert parsed.aura.no_route is False
+
+
+@pytest.mark.parametrize("option,value", [
+    ("--python-preference", "only-system"),
+    ("--python-fetch", "never"),
+    ("--preview-features", "all"),
+    ("--preview-feature", "all"),
+    ("--trusted-host", "localhost"),
+])
+def test_current_global_value_options_do_not_hide_the_command(option, value) -> None:
+    args = [option, value, "--aura-no-input", "sync"]
+    parsed = parse_invocation(args)
+    assert parsed.command == "sync"
+    assert parsed.command_index == 2
+    assert parsed.uv_args == (option, value, "sync")
+    assert parsed.aura.no_input is True

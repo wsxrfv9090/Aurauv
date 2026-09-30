@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- 修复短参数（含 `-p3.13`、`-qP PACKAGE`、`-nfPATH` 等组合）的预同步转发，保留 Python、索引和构建参数。
+- 识别 preview、Python preference/fetch 与 trusted-host 等全局参数及别名，避免误把参数值识别为 uv 命令。
+- uv 的 help/version 请求直接转发，不再创建环境、lockfile 或 Aurauv state；`run -` 和短 `-s` 组合正确区分子程序边界。
+- 预同步保留参数顺序、反向开关和相对路径的原始工作目录，`--no-active` 正确覆盖 `--active`。
 - 支持当前 uv 的 `run --no-editable-package`、`--upgrade-group`、`--prerelease-package` 和 `--system-certs`，预同步保留这些选项。
 - `workspace` 和未来 uv 子命令的参数原样转发，不再误吞子命令后的 `--aura-*`。
 - 修复 `run -m` / `-s` 选项边界，子程序参数不再影响路由、repair 或 fallback 同步。

@@ -4,6 +4,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+import zipfile
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 EXPECTED_VERSION = "aurauv 0.2.0"
@@ -54,6 +55,19 @@ def test_tracked_zipapps_are_identical_and_report_release_version() -> None:
     assert len(set(payloads)) == 1
     for archive in TRACKED_ARCHIVES:
         _run_version([sys.executable, str(archive), "aura", "version"])
+
+
+def test_tracked_zipapps_contain_current_source() -> None:
+    source_root = REPO_ROOT / "src"
+    expected = {
+        path.relative_to(source_root).as_posix(): path.read_bytes()
+        for path in (source_root / "aurauv").rglob("*.py")
+    }
+    for path in TRACKED_ARCHIVES:
+        with zipfile.ZipFile(path) as archive:
+            actual = {name: archive.read(name) for name in archive.namelist()
+                      if name.startswith("aurauv/")}
+        assert actual == expected
 
 
 def test_project_launcher_keeps_project_local_and_supports_version() -> None:

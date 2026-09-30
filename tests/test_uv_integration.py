@@ -6,13 +6,17 @@ from pathlib import Path
 import subprocess
 import sys
 
+import pytest
+
 from helpers import make_wheel
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
-def _run(project: Path, uv_path: Path, *args: str) -> subprocess.CompletedProcess[str]:
+def _run(
+    project: Path, uv_path: Path, *args: str, input: str | None = None
+) -> subprocess.CompletedProcess[str]:
     env = {
         **os.environ,
         "PYTHONPATH": str(REPO_ROOT / "src"),
@@ -25,7 +29,96 @@ def _run(project: Path, uv_path: Path, *args: str) -> subprocess.CompletedProces
         check=False,
         text=True,
         capture_output=True,
+        input=input,
     )
+
+
+@pytest.mark.parametrize("command", ["sync", "run", "add", "remove", "lock", "export", "tree"])
+def test_uv_help_never_requires_or_changes_a_project(tmp_path: Path, uv_path: Path, command: str) -> None:
+    result = _run(tmp_path, uv_path, command, "--help")
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert "Usage:" in result.stdout
+    assert not list(tmp_path.iterdir())
+
+
+def test_uv_run_help_in_managed_project_does_not_presync(tmp_path: Path, uv_path: Path) -> None:
+    project = _exclusive_distribution_project(tmp_path)
+    before = set(project.rglob("*"))
+    result = _run(project, uv_path, "--offline", "run", "-qh")
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert set(project.rglob("*")) == before
+
+
+def test_doctor_preserves_relative_directory_for_its_sync_check(tmp_path: Path, uv_path: Path) -> None:
+    project = _exclusive_distribution_project(tmp_path)
+    sync = _run(project, uv_path, "--offline", "sync")
+    assert sync.returncode == 0, sync.stderr + sync.stdout
+    result = _run(tmp_path, uv_path, "--offline", "--directory", project.name, "aura", "doctor")
+    assert result.returncode == 0, result.stderr + result.stdout
+
+
+@pytest.mark.parametrize("prefix,run_options", [
+    (["--project", "project"], ["-nf./wheels"]),
+    (["--directory", "project"], ["-nf../wheels"]),
+    ([], ["--directory", "project", "-nf../wheels"]),
+])
+def test_run_presync_keeps_short_options_and_relative_paths(
+    tmp_path: Path, uv_path: Path, prefix: list[str], run_options: list[str]
+) -> None:
+    wheels = tmp_path / "wheels"
+    wheels.mkdir()
+    make_wheel(wheels, "alias-route", "alias_route")
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "pyproject.toml").write_text('''[project]
+name = "alias-demo"
+version = "0.1.0"
+requires-python = ">=3.11"
+
+[project.optional-dependencies]
+local = ["alias-route"]
+
+[tool.aurauv]
+schema-version = 1
+python-request = "3.13"
+python-install-policy = "never"
+uv-update-policy = "never"
+
+[tool.aurauv.routes.runtime]
+default = "local"
+providers = []
+
+[tool.aurauv.routes.runtime.options.local]
+extras = ["local"]
+''', encoding="utf-8")
+    result = _run(
+        tmp_path, uv_path, "--python-preference", "only-system", *prefix,
+        "run", *run_options, "-p", sys.executable, "--no-index", "--offline",
+        "python", "-c", "import alias_route, sys; print('alias-ok', sys.version_info[:2])",
+    )
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert f"alias-ok {sys.version_info[:2]}" in result.stdout
+    assert (project / ".venv").is_dir()
+    assert not (tmp_path / ".venv").exists()
+
+
+def test_short_script_cluster_passes_through_without_a_project(tmp_path: Path, uv_path: Path) -> None:
+    script = tmp_path / "script.py"
+    script.write_text("print('script-ok')\n", encoding="utf-8")
+    result = _run(tmp_path, uv_path, "run", "-qs", "--offline", str(script))
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert "script-ok" in result.stdout
+    assert sorted(path.name for path in tmp_path.iterdir()) == ["script.py"]
+
+
+def test_stdin_child_flags_do_not_bypass_managed_routes(tmp_path: Path, uv_path: Path) -> None:
+    project = _exclusive_distribution_project(tmp_path)
+    result = _run(
+        project, uv_path, "--offline", "run", "-", "--isolated", "--group", "child",
+        input="import shared_cv, sys; print('stdin-route-ok', sys.argv[1:])\n",
+    )
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert "stdin-route-ok ['--isolated', '--group', 'child']" in result.stdout
 
 
 def test_offline_sync_add_run_remove_preserves_route(tmp_path: Path, uv_path: Path) -> None:
