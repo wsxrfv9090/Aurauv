@@ -16,12 +16,15 @@ class RouteOptionSpec:
 
 @dataclass(frozen=True, slots=True)
 class RouteSpec:
+    """Describe one choice dimension and its optional user-facing activation extra."""
+
     name: str
     default: str
     detector: str | None
     providers: tuple[str, ...]
     fallbacks: dict[str, str]
     options: dict[str, RouteOptionSpec]
+    activation_extra: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

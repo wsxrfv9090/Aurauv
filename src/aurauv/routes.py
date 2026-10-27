@@ -59,7 +59,10 @@ def select_routes(
     persisted: dict[str, str],
     environment_python: Path,
 ) -> dict[str, RouteSelection]:
+    """Select routes, preflighting optional providers only when explicitly activated."""
     uv_overrides = explicit_route_from_uv_extras(config, uv_args)
+    supplied_extras = set(option_values(uv_args, "--extra"))
+    excluded_extras = set(option_values(uv_args, "--no-extra"))
     selections: dict[str, RouteSelection] = {}
 
     for route_name, route in config.routes.items():
@@ -110,10 +113,24 @@ def select_routes(
                 f"Unknown option {selected!r} for route {route_name!r}; "
                 f"available: {', '.join(route.options)}."
             )
+        active = True
+        if route.activation_extra is not None:
+            active = (
+                route.activation_extra in supplied_extras
+                or route_name in uv_overrides
+                or route_name in aura.route_overrides
+            )
+            if route.activation_extra in excluded_extras:
+                if route_name in uv_overrides or route_name in aura.route_overrides:
+                    raise AurauvError(
+                        f"--no-extra {route.activation_extra} contradicts route {route_name!r}."
+                    )
+                active = False
+            details = {**details, "active": active, "activation_extra": route.activation_extra}
         fallback_from: str | None = None
         fallback_reason: str | None = None
         try:
-            preflight = _preflight_route(route_name, selected, providers, config)
+            preflight = _preflight_route(route_name, selected, providers, config) if active else {}
         except ProviderPreflightError as failure:
             explicit_fallback = aura.fallback_overrides.get(route_name)
             fallback = explicit_fallback or route.fallbacks.get(selected)
@@ -153,9 +170,12 @@ def select_routes(
 def selected_extras(
     config: AurauvConfig, selections: dict[str, RouteSelection]
 ) -> tuple[str, ...]:
+    """Return installation extras for active routes in configuration order."""
     result: list[str] = []
     seen: set[str] = set()
     for route_name in config.routes:
+        if selections[route_name].details.get("active") is False:
+            continue
         option = config.routes[route_name].options[selections[route_name].selected]
         for extra in option.extras:
             if extra not in seen:

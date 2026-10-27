@@ -1,5 +1,10 @@
 # Aurauv
 
+- Editor: Codex
+- Updated at: 2026-10-26T23:31:23-07:00
+- Editing hostname: wsxrfv9090-omarchy
+- Editing session ID: codex:01a1726d-fb1a-7d80-bee3-102f33fa26a5
+
 > **Aura around uv：在不替代 uv 的前提下，为机器相关依赖、项目拓扑和共享环境增加一层可验证的路由。**
 
 Aurauv 是面向 ML 项目的 `uv` 包装层。它保留 `uv` 负责的依赖解析、锁文件、环境同步和 Python 管理，只补上 `uv` 本身不会替项目决定的部分：
@@ -448,6 +453,96 @@ PyTorch 自动检测：
 声明；这类修正仍应由根 `tool.uv.override-dependencies` 明确表达并进入 `uv.lock`。
 
 ---
+
+### 5.6 Optional llama.cpp CPU/CUDA wheels
+
+The `llama-cpp` provider selects upstream `llama-cpp-python` wheels independently
+of PyTorch. A working NVIDIA runtime selects CUDA; a present but broken NVIDIA
+driver is an error when the route is activated. CPU/CUDA sources and versions
+remain in project metadata and `uv.lock`; no post-sync pip installation occurs.
+CUDA wheels do not require a local `nvcc` compiler, but upstream excludes cudart
+and cuBLAS from the wheel. Declare the NVIDIA runtime packages in the CUDA extra;
+use matching major-version bounds (`-cu11`/`-cu12` package suffixes for those older
+CUDA majors). They are resolved by uv independently of PyTorch. Aurauv discovers
+their library directories in the selected interpreter and prepends them to
+`LD_LIBRARY_PATH` for its native probe, configured import checks, and `aurauv run`
+children. It preserves existing search paths and never edits shell/system settings.
+Launch Jupyter through `aurauv run` so its kernel children inherit these paths.
+An interpreter launched outside Aurauv needs equivalent library-path setup;
+current-interpreter bootstrap does not change an already-running parent kernel.
+This provider currently
+supports Linux CPU and Linux x86-64 NVIDIA CUDA, not macOS/Metal, Windows,
+Vulkan, or ROCm. Other platforms fail preflight when the route is activated.
+
+Use a separate, empty feature extra as an opt-in switch:
+
+```toml
+[project.optional-dependencies]
+llama-cpp-gllm = []
+llama-cpp-cpu = ["llama-cpp-python>=0.3.36"]
+llama-cpp-cuda = [
+    "llama-cpp-python>=0.3.36",
+    "nvidia-cuda-runtime>=13,<14; sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "nvidia-cublas>=13,<14; sys_platform == 'linux' and platform_machine == 'x86_64'",
+]
+
+[tool.uv]
+conflicts = [[{extra="llama-cpp-cpu"}, {extra="llama-cpp-cuda"}]]
+
+[[tool.uv.index]]
+name = "llama-cpp-cpu"
+url = "https://abetlen.github.io/llama-cpp-python/whl/cpu"
+explicit = true
+
+[[tool.uv.index]]
+name = "llama-cpp-cuda"
+url = "https://abetlen.github.io/llama-cpp-python/whl/cu130"
+explicit = true
+
+[tool.uv.sources]
+llama-cpp-python = [
+  {index="llama-cpp-cpu", extra="llama-cpp-cpu"},
+  {index="llama-cpp-cuda", extra="llama-cpp-cuda"},
+]
+
+[tool.aurauv.routes.llama-cpp]
+default = "auto"
+detector = "llama-cpp"
+providers = ["llama-cpp"]
+activation-extra = "llama-cpp-gllm"
+
+[tool.aurauv.routes.llama-cpp.options.cpu]
+extras = ["llama-cpp-cpu"]
+
+[tool.aurauv.routes.llama-cpp.options.cuda]
+extras = ["llama-cpp-cuda"]
+
+[tool.aurauv.providers.llama-cpp]
+type = "llama-cpp"
+route = "llama-cpp"
+indexes = {cpu="llama-cpp-cpu", cuda="llama-cpp-cuda"}
+```
+
+Merge these tables with existing routes rather than replacing them. Then use:
+
+```bash
+aurauv sync --extra llama-cpp-gllm --inexact
+```
+
+`activation-extra` is a general route option: only that feature extra, an option
+extra, or an explicit `--aura-route` activates installation. Persisted hardware
+selection alone never enables an optional dependency. Exact sync without the
+feature removes it normally; inexact sync can retain it. Retained installations
+are still verified. For `run` with automatic sync, include the feature extra;
+`run --no-sync` uses and verifies the existing installation.
+`aurauv aura upgrade llama-cpp` explicitly activates this optional provider for
+its upgrade and keeps the selected wheel installed.
+
+Verification imports the managed interpreter's native library, enumerates ggml
+devices, and allocates/clears/synchronizes a 4 KiB CPU/CUDA buffer. It checks for
+an actual CUDA device, not merely generic GPU-offload support. It does not load
+model weights or measure inference quality; model loading must still request
+GPU layers. Wrong or unusable native builds fail visibly without a CPU fallback.
 
 ## 6. fallback 绝不静默
 

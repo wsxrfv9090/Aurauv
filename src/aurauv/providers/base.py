@@ -57,6 +57,17 @@ class Provider:
     def verify(self, python: Path, *, option: str, cwd: Path) -> VerificationResult:
         raise NotImplementedError
 
+    def runtime_environment(
+        self, python: Path, *, option: str, cwd: Path
+    ) -> dict[str, str]:
+        """Return child-process environment overrides for the installed runtime.
+
+        Providers may inspect the selected interpreter but must not install packages
+        or change the parent process environment. Overrides apply to managed program
+        execution and project import checks; provider probes use the same setup.
+        """
+        return {}
+
     def protected_packages(self) -> tuple[str, ...]:
         return ()
 

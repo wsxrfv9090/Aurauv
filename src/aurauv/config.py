@@ -81,6 +81,7 @@ def _project_distribution(path: Path) -> str:
 
 
 def load_config(owner_root: Path) -> AurauvConfig:
+    """Read owner metadata and validate routes, optional activation, and providers."""
     owner_root = owner_root.resolve()
     pyproject_path = owner_root / "pyproject.toml"
     pyproject = load_toml(pyproject_path)
@@ -198,6 +199,17 @@ def load_config(owner_root: Path) -> AurauvConfig:
                 raise AurauvError(
                     f"Route {route_name!r} fallback {source}={target} uses an unknown option."
                 )
+        activation_extra = route_value.get("activation-extra")
+        if activation_extra is not None:
+            activation_extra = _string(
+                activation_extra, field=f"routes.{route_name}.activation-extra"
+            )
+            if activation_extra not in owner_optional:
+                raise AurauvError(
+                    f"Route {route_name!r} activation-extra {activation_extra!r} is missing."
+                )
+            if any(activation_extra in option.extras for option in options.values()):
+                raise AurauvError("activation-extra must be separate from route option extras.")
         routes[route_name] = RouteSpec(
             name=route_name,
             default=default,
@@ -205,6 +217,7 @@ def load_config(owner_root: Path) -> AurauvConfig:
             providers=providers,
             fallbacks=fallbacks,
             options=options,
+            activation_extra=activation_extra,
         )
 
     conflicts = pyproject.get("tool", {}).get("uv", {}).get("conflicts", [])

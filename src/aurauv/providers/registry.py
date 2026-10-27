@@ -8,10 +8,12 @@ from ..process import CommandRunner
 from .base import Provider
 from .exclusive_distribution import ExclusiveDistributionProvider
 from .pytorch import PytorchProvider
+from .llama_cpp import LlamaCppProvider
 from .pytorch_companion import PytorchCompanionProvider
 
 
 _PROVIDER_TYPES = {
+    "llama-cpp": LlamaCppProvider,
     "exclusive-distribution": ExclusiveDistributionProvider,
     "pytorch": PytorchProvider,
     "pytorch-companion": PytorchCompanionProvider,

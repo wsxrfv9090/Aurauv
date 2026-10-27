@@ -7,7 +7,7 @@ from pathlib import Path
 import zipfile
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-EXPECTED_VERSION = "aurauv 0.2.0"
+EXPECTED_VERSION = "aurauv 0.3.0"
 TEMPLATE_KINDS = ("standalone", "workspace-member", "workspace-root")
 TRACKED_ARCHIVES = (
     REPO_ROOT / "bootstrap" / "aurauv.pyz",

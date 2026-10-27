@@ -390,6 +390,26 @@ class AurauvEngine:
     def _child_env(self) -> dict[str, str]:
         return dict(child_environment(self.py))
 
+    def _runtime_env(self, selections: dict[str, RouteSelection]) -> dict[str, str]:
+        """Combine provider-owned runtime settings for child processes only.
+
+        Retained optional installations may need settings even without an active
+        installation extra. Conflicting provider overrides fail before execution.
+        """
+        overrides: dict[str, str] = {}
+        python = self._environment_python()
+        for route_name, route in self.cfg.routes.items():
+            for name in route.providers:
+                values = self.providers[name].runtime_environment(
+                    python, option=selections[route_name].selected,
+                    cwd=self.cfg.owner_root,
+                )
+                for key, value in values.items():
+                    if key in overrides and overrides[key] != value:
+                        raise AurauvError(f"Providers supplied conflicting runtime values for {key}.")
+                    overrides[key] = value
+        return {**self._child_env(), **overrides}
+
     def _environment_python(self) -> Path:
         return environment_python(self.env_identity)
 
@@ -613,7 +633,8 @@ class AurauvEngine:
                 offline=offline,
             )
 
-    def _verify_imports(self, python: Path) -> None:
+    def _verify_imports(self, python: Path, *, env: dict[str, str] | None = None) -> None:
+        """Check configured imports with the same runtime settings as managed runs."""
         if not self.cfg.verify_imports:
             return
         code = (
@@ -622,7 +643,7 @@ class AurauvEngine:
             "[importlib.import_module(name) for name in mods]; "
             "print('[aurauv] VERIFY: imports succeeded: ' + ', '.join(mods))"
         )
-        self.runner.run([str(python), "-c", code], cwd=self.cfg.owner_root)
+        self.runner.run([str(python), "-c", code], cwd=self.cfg.owner_root, env=env)
 
     def _verify_providers(
         self,
@@ -665,7 +686,7 @@ class AurauvEngine:
                     else:
                         raise
                 results[provider_name] = verified.details
-        self._verify_imports(python)
+        self._verify_imports(python, env=self._runtime_env(selections))
         return results
 
     def _verify_with_runtime_fallback(
@@ -856,7 +877,7 @@ class AurauvEngine:
             [str(self.uv), *routed],
             cwd=self.cwd,
             allowed_exit_codes=tuple(range(0, 256)),
-            env=self._child_env(),
+            env=self._runtime_env(selections),
         )
         return completed.returncode
 
@@ -1151,7 +1172,11 @@ class AurauvEngine:
             lock_args.extend(("--upgrade-package", package))
         self._run_uv(lock_args, cwd=self.cfg.owner_root)
 
-        selections = self._select()
+        selection_args = list(self.parsed.uv_args)
+        activation_extra = self.cfg.routes[provider.spec.route].activation_extra
+        if activation_extra is not None:
+            selection_args.extend(("--extra", activation_extra))
+        selections = self._select(selection_args)
         self._run_uv(self._fresh_sync_args(selections), cwd=self.cwd)
         selections, results = self._verify_with_runtime_fallback(
             selections, allow_repair=True, allow_resync=True
